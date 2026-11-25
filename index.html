@@ -1,1 +1,4962 @@
-<h1>WORKS</h1>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#000000">
+  <title>OpenRouter · PWA Client</title>
+
+  <!-- Separate Google Fonts links: Google Sans, Google Sans Code, Inter (Cyrillic fallback) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Code:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    /* ==========================================================================
+       DESIGN TOKENS — Seamless #000000 Canvas & Borderless Tonal Gray Plaques
+       ZERO BORDERS OR OUTLINES ANYWHERE IN THE APPLICATION
+       ========================================================================== */
+    :root {
+      --bg-canvas: #000000;
+      --bg-user-card: #151618;
+      --bg-code: #1e1f20;
+
+      /* Flat Borderless Tonal Surfaces */
+      --bg-header-btn: #222428;
+      --bg-header-btn-active: #30333a;
+      --bg-popover: #1e1f24;
+      --bg-thinking-group: #15161a;
+      --bg-popover-sub: #17181d;
+      --bg-surface-elev: #2e3038;
+      --bg-surface-hover: #343741;
+
+      /* Left Drawer Plaques */
+      --bg-drawer: #111113;
+      --bg-drawer-plaque: #1a1b1f;
+      --bg-drawer-tab-active: #2d3036;
+      --bg-drawer-input: #111113;
+      --bg-drawer-row-active: #1c1e22;
+      --bg-drawer-row-selected: #24272d;
+      --bg-drawer-row-ctx: #2a2d35;
+      --bg-checkbox-off: #2a2c32;
+      --bg-ctx-menu: #222428;
+
+      /* Floating Dock, Voice Panel, Tier-2 Pills & Composer */
+      --bg-scroll-btn: #2b2e34;
+      --bg-scroll-btn-active: #3a3e47;
+      --bg-tier2-pill: rgba(38, 40, 46, 0.92);
+      --bg-tier2-pill-active: rgba(52, 55, 64, 0.96);
+      --bg-voice-panel: #22242b;
+      --bg-voice-btn: #2d3039;
+      --bg-voice-btn-elev: #3d414d;
+
+      --bg-composer: rgba(50, 52, 59, 0.95);
+      --bg-composer-btn: #41454f;
+      --bg-composer-btn-active: #505562;
+      --bg-send-ready: #575c69;
+      --bg-send-stop: #5a2b2e;
+      --bg-mic-rec: #7a292e;
+      --bg-mic-transcribing: #474b57;
+
+      /* Text Palette */
+      --text-bright: #ffffff;
+      --text-header: #e3e3e3;
+      --text-chat: #d3d5d9;
+      --text-input: #c8cbd0;
+      --text-placeholder: #7a7e86;
+      --text-btn-bright: #f0f2f5;
+      --text-code: #c4c7c5;
+      --text-chevron: #c4c7c5;
+      --text-row2: #b4b7bc;
+      --text-thinking: #a8abb0;
+      --text-tier2: #9a9fa8;
+      --text-tier2-active: #c5c9d2;
+      --text-level: #8e9196;
+      --text-clear-x: #848891;
+      --text-sub: #767880;
+      --text-dim: #58585e;
+      --text-disabled: #5a5d66;
+
+      --pill-light-bg: #e3e3e3;
+      --pill-light-text: #111215;
+      --rec-red: #f05d62;
+
+      --radius-pill: 999px;
+      --radius-card: 20px;
+      --radius-popover: 18px;
+
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+      --font-sans: 'Google Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'Google Sans Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    /* ==========================================================================
+       GLOBAL ZERO-BORDER & iOS LONG-PRESS SELECTION LOCK
+       ========================================================================== */
+    html, body, *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      border: none;
+      outline: none;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    input, textarea {
+      -webkit-user-select: text;
+      user-select: text;
+      -webkit-touch-callout: default;
+    }
+
+    body:not(.drawer-open) .msg-body,
+    body:not(.drawer-open) .msg-body * {
+      -webkit-user-select: text;
+      user-select: text;
+      -webkit-touch-callout: default;
+    }
+
+    body.drawer-open .app-shell,
+    body.drawer-open .chat-feed,
+    body.drawer-open .drawer-backdrop,
+    body.drawer-open .msg-body,
+    body.drawer-open .msg-body * {
+      -webkit-user-select: none !important;
+      user-select: none !important;
+      -webkit-touch-callout: none !important;
+    }
+
+    body.drawer-open .drawer input,
+    body.drawer-open .drawer textarea {
+      -webkit-user-select: text !important;
+      user-select: text !important;
+      -webkit-touch-callout: default !important;
+    }
+
+    /* ==========================================================================
+       COMPLETE APP UI LOCK DURING MIC RECORDING & TRANSCRIPTION
+       ========================================================================== */
+    body.mic-recording .top-header,
+    body.mic-recording .chat-feed,
+    body.mic-recording .scroll-bottom-btn,
+    body.mic-recording .tier2-bar,
+    body.mic-recording .voice-dock,
+    body.mic-recording .plus-btn,
+    body.mic-recording .composer-input-wrap,
+    body.mic-recording .send-btn,
+    body.mic-recording .drawer,
+    body.mic-recording .drawer-backdrop,
+    body.mic-transcribing .top-header,
+    body.mic-transcribing .chat-feed,
+    body.mic-transcribing .scroll-bottom-btn,
+    body.mic-transcribing .tier2-bar,
+    body.mic-transcribing .voice-dock,
+    body.mic-transcribing .plus-btn,
+    body.mic-transcribing .composer-input-wrap,
+    body.mic-transcribing .send-btn,
+    body.mic-transcribing .drawer,
+    body.mic-transcribing .drawer-backdrop {
+      pointer-events: none !important;
+    }
+
+    body.mic-recording .top-header,
+    body.mic-recording .tier2-bar,
+    body.mic-recording .scroll-bottom-btn,
+    body.mic-recording .plus-btn,
+    body.mic-recording .send-btn,
+    body.mic-recording .msg-footer,
+    body.mic-transcribing .top-header,
+    body.mic-transcribing .tier2-bar,
+    body.mic-transcribing .scroll-bottom-btn,
+    body.mic-transcribing .plus-btn,
+    body.mic-transcribing .send-btn,
+    body.mic-transcribing .msg-footer {
+      opacity: 0.35;
+      transition: opacity 0.16s ease;
+    }
+
+    /* During recording ONLY #btn-mic stays interactive & vivid */
+    body.mic-recording #btn-mic {
+      pointer-events: auto !important;
+      opacity: 1 !important;
+    }
+
+    /* During transcription ALL buttons INCLUDING #btn-mic are completely locked */
+    body.mic-transcribing #btn-mic {
+      pointer-events: none !important;
+      cursor: default;
+    }
+
+    /* ==========================================================================
+       BASE & iOS PWA GEOMETRY
+       ========================================================================== */
+    html, body {
+      width: 100%;
+      height: 100%;
+      height: 100dvh;
+      background-color: var(--bg-canvas);
+      color: var(--text-chat);
+      font-family: var(--font-sans);
+      font-size: 17px;
+      line-height: 1.52;
+      font-weight: 400;
+      letter-spacing: -0.005em;
+      font-optical-sizing: auto;
+      overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: manipulation;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    button {
+      font-family: var(--font-sans);
+      font-optical-sizing: auto;
+      color: inherit;
+      background: none;
+      border: none;
+      outline: none;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    /* Strictly >= 16px on every <input> and <textarea> so iOS Safari never zooms */
+    input {
+      font-family: var(--font-sans);
+      font-optical-sizing: auto;
+      font-size: 16px !important;
+      color: var(--text-header);
+      background: transparent;
+      border: none;
+      outline: none;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    textarea {
+      font-family: var(--font-sans);
+      font-optical-sizing: auto;
+      color: var(--text-input);
+      caret-color: var(--text-input);
+      background: transparent;
+      border: none;
+      outline: none;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Full-bleed on iPhone; centered 390px preview shell on desktop */
+    .app-shell {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      width: 100%;
+      height: 100dvh;
+      margin: 0 auto;
+      background-color: var(--bg-canvas);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    @media (min-width: 520px) {
+      .app-shell {
+        max-width: 390px;
+        box-shadow: 0 0 72px rgba(255, 255, 255, 0.05), 0 0 48px rgba(0, 0, 0, 0.9);
+      }
+    }
+
+    /* ==========================================================================
+       TOP HEADER — 2 ROWS, SEAMLESS #000000, NO BALANCE IN HEADER
+       ========================================================================== */
+    .top-header {
+      position: relative;
+      z-index: 30;
+      flex-shrink: 0;
+      background-color: var(--bg-canvas);
+      padding: max(10px, var(--safe-top)) 12px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+    }
+
+    /* Pixel-identical 44x44 circular borderless gray buttons (#btn-menu & #btn-new-chat) */
+    .hdr-circle-btn {
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
+      min-height: 44px;
+      flex: 0 0 44px;
+      border-radius: 50%;
+      background-color: var(--bg-header-btn);
+      color: var(--text-header);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.14s ease, transform 0.1s ease;
+    }
+
+    .hdr-circle-btn:active {
+      background-color: var(--bg-header-btn-active);
+      transform: scale(0.93);
+    }
+
+    .hdr-circle-btn svg {
+      width: 21px;
+      height: 21px;
+      flex-shrink: 0;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.9;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* Center 2-row stack between Menu and New Chat */
+    .header-center {
+      flex: 1;
+      min-width: 0;
+      margin: 0 10px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 5px;
+    }
+
+    /* Row 1: Centered Model + Thinking Level trigger (NO Balance in header) */
+    .hdr-row-1 {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      min-width: 0;
+    }
+
+    .gemini-model-trigger {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      max-width: 100%;
+      min-width: 0;
+      padding: 2px 6px;
+      border-radius: 10px;
+      line-height: 1.2;
+      overflow: hidden;
+      white-space: nowrap;
+      transition: opacity 0.12s ease;
+    }
+
+    .gemini-model-trigger:active {
+      opacity: 0.65;
+    }
+
+    .gmt-model {
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--text-header);
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+
+    .gmt-level {
+      font-size: 16px;
+      font-weight: 400;
+      color: var(--text-level);
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .gmt-chev {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      color: var(--text-chevron);
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2.1;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      margin-left: -1px;
+      transition: transform 0.16s ease;
+    }
+
+    .gemini-model-trigger.open .gmt-chev {
+      transform: rotate(180deg);
+    }
+
+    /* Row 2: Stretched horizontally between Menu & New Chat (TTS left, STT right) */
+    .hdr-row-2 {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      width: 100%;
+      min-width: 0;
+      line-height: 1.2;
+    }
+
+    .meta-trigger {
+      flex: 1;
+      min-width: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 13.5px;
+      font-weight: 400;
+      line-height: 1.2;
+      color: var(--text-row2);
+      padding: 1px 0;
+      transition: color 0.12s ease;
+    }
+
+    .meta-trigger.stt-trigger {
+      justify-content: flex-end;
+    }
+
+    .meta-trigger:active,
+    .meta-trigger.open {
+      color: var(--text-bright);
+    }
+
+    .meta-trigger .row2-ico {
+      width: 13.5px;
+      height: 13.5px;
+      flex-shrink: 0;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.85;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .meta-trigger .lbl {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .meta-trigger .chev {
+      width: 10px;
+      height: 10px;
+      flex-shrink: 0;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2.1;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: 0.78;
+      transition: transform 0.16s ease;
+    }
+
+    .meta-trigger.open .chev {
+      transform: rotate(180deg);
+    }
+
+    @media (max-width: 375px) {
+      .gmt-model, .gmt-level { font-size: 15px; }
+      .meta-trigger { font-size: 12.5px; }
+    }
+
+    /* ==========================================================================
+       FLAT BORDERLESS POPOVERS (#1e1f24) — MODEL, TTS, STT, VOICE, STATS, INFO
+       ========================================================================== */
+    .popover-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 55;
+      background: rgba(0, 0, 0, 0.42);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+
+    .popover-backdrop.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .popover-menu {
+      position: absolute;
+      z-index: 60;
+      min-width: 236px;
+      max-width: calc(100% - 20px);
+      max-height: 68vh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      background: var(--bg-popover);
+      border-radius: var(--radius-popover);
+      box-shadow: 0 18px 44px rgba(0, 0, 0, 0.84);
+      padding: 6px;
+      opacity: 0;
+      transform: translateY(-6px) scale(0.97);
+      pointer-events: none;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+
+    .popover-menu.drop-up {
+      transform: translateY(6px) scale(0.97);
+    }
+
+    .popover-menu.open {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .popover-menu.gemini-model-menu {
+      width: 268px;
+      min-width: 268px;
+      padding: 6px;
+      overflow-x: hidden;
+    }
+
+    .popover-menu.selector-menu {
+      width: 256px;
+      min-width: 244px;
+      padding: 6px;
+      overflow-x: hidden;
+    }
+
+    .mdd-list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .mdd-item {
+      width: 100%;
+      padding: 11px 12px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-family: var(--font-sans);
+      font-size: 15px;
+      font-weight: 400;
+      line-height: 1.25;
+      color: var(--text-header);
+      background-color: transparent;
+      text-align: left;
+      transition: background-color 0.12s ease, color 0.12s ease;
+    }
+
+    .mdd-item span:first-child {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .mdd-item:active {
+      background-color: var(--bg-surface-hover);
+    }
+
+    .mdd-item.selected {
+      background-color: var(--bg-surface-elev);
+      color: var(--text-header);
+      font-weight: 500;
+    }
+
+    .mdd-check {
+      width: 17px;
+      height: 17px;
+      flex-shrink: 0;
+      color: var(--text-header);
+      opacity: 0;
+    }
+
+    .mdd-item.selected .mdd-check {
+      opacity: 1;
+    }
+
+    .mdd-gap {
+      height: 4px;
+      flex-shrink: 0;
+    }
+
+    /* Thinking level toggle row with exact 18x18 chevron slot */
+    .mdd-thinking-btn {
+      width: 100%;
+      padding: 11px 12px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 15px;
+      font-weight: 400;
+      line-height: 1.25;
+      color: var(--text-header);
+      background-color: transparent;
+      text-align: left;
+      transition: background-color 0.12s ease;
+    }
+
+    .mdd-thinking-btn:active {
+      background-color: var(--bg-surface-hover);
+    }
+
+    .mdd-thinking-chev {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-chevron);
+    }
+
+    .mdd-thinking-chev svg {
+      width: 15px;
+      height: 15px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2.1;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .mdd-thinking-btn.expanded .mdd-thinking-chev svg {
+      transform: rotate(90deg);
+    }
+
+    .mdd-thinking-current {
+      margin-left: auto;
+      font-size: 13px;
+      color: var(--text-level);
+    }
+
+    /* CRITICAL COLLAPSE FIX:
+       Zero vertical padding/margin on collapsed wrapper + inner 0fr item,
+       visibility: hidden + opacity: 0 when closed so selected 'None' (#2e3038)
+       NEVER leaks even 1px above Flex. Expanded group uses darker #15161a. */
+    .mdd-thinking-panel {
+      display: grid;
+      grid-template-rows: 0fr;
+      overflow: hidden;
+      margin: 0;
+      padding: 0;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition:
+        grid-template-rows 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        margin 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.14s ease,
+        visibility 0s linear 0.18s;
+    }
+
+    .mdd-thinking-panel.expanded {
+      grid-template-rows: 1fr;
+      margin: 2px 0 4px;
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transition:
+        grid-template-rows 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        margin 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.14s ease,
+        visibility 0s linear 0s;
+    }
+
+    .mdd-thinking-inner {
+      overflow: hidden;
+      min-height: 0;
+      padding: 0;
+      margin: 0;
+      background-color: var(--bg-thinking-group);
+      border-radius: 10px;
+    }
+
+    .mdd-thinking-list {
+      padding: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .mdd-think-opt {
+      width: 100%;
+      padding: 9px 10px 9px 32px;
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 14.5px;
+      color: var(--text-row2);
+      background-color: transparent;
+      text-align: left;
+      transition: background-color 0.12s ease, color 0.12s ease;
+    }
+
+    .mdd-think-opt:active {
+      background-color: var(--bg-surface-hover);
+    }
+
+    .mdd-think-opt.selected {
+      background-color: var(--bg-surface-elev);
+      color: var(--text-header);
+      font-weight: 500;
+    }
+
+    .mdd-think-opt .mdd-check {
+      width: 15px;
+      height: 15px;
+    }
+
+    .mdd-think-opt.selected .mdd-check {
+      opacity: 1;
+    }
+
+    /* Flex row directly on #1e1f24 background (NO dark box behind it) */
+    .mdd-flex-item {
+      width: 100%;
+      padding: 11px 12px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-family: var(--font-sans);
+      font-size: 15px;
+      font-weight: 400;
+      line-height: 1.25;
+      background-color: transparent;
+      color: var(--text-header);
+      text-align: left;
+      transition: background-color 0.12s ease, color 0.12s ease;
+    }
+
+    .mdd-flex-item:active {
+      background-color: var(--bg-surface-hover);
+    }
+
+    .mdd-flex-item.is-on {
+      background-color: var(--bg-surface-elev);
+      color: var(--text-header);
+      font-weight: 500;
+    }
+
+    .mdd-flex-item.is-on .mdd-check {
+      opacity: 1;
+    }
+
+    .mdd-flex-item.is-disabled {
+      background-color: transparent;
+      color: var(--text-disabled);
+      pointer-events: none;
+    }
+
+    /* Compact Borderless ••• Message Info Popover */
+    .popover-menu.info-popover {
+      min-width: 196px;
+      width: auto;
+      padding: 10px 14px;
+      border-radius: 14px;
+      box-shadow: 0 14px 36px rgba(0, 0, 0, 0.84);
+    }
+
+    .info-pop-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .info-pop-time {
+      font-size: 13px;
+      line-height: 1.3;
+      color: var(--text-header);
+      font-variant-numeric: tabular-nums;
+      white-space: pre;
+    }
+
+    .info-pop-model {
+      font-size: 13px;
+      line-height: 1.3;
+      color: var(--text-level);
+      padding: 6px 8px;
+      border-radius: 8px;
+      background-color: var(--bg-popover-sub);
+      white-space: nowrap;
+    }
+
+    .info-pop-model strong {
+      color: var(--text-header);
+      font-weight: 500;
+    }
+
+    /* Upward Balance Breakdown Popover */
+    .stats-card {
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 280px;
+      max-width: 100%;
+    }
+
+    .stats-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .stats-balance-val {
+      font-size: 20px;
+      font-weight: 500;
+      color: var(--text-bright);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stats-balance-lbl {
+      font-size: 12px;
+      color: var(--text-level);
+    }
+
+    .stats-limit-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .stats-limit-head {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-level);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stats-progress-track {
+      width: 100%;
+      height: 5px;
+      border-radius: var(--radius-pill);
+      background: var(--bg-surface-elev);
+      overflow: hidden;
+    }
+
+    .stats-progress-fill {
+      height: 100%;
+      background: var(--text-header);
+      border-radius: var(--radius-pill);
+    }
+
+    .stats-quota-box {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 9px 11px;
+      background: var(--bg-surface-elev);
+      border-radius: 12px;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stats-table {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 11px;
+      border-radius: 12px;
+      background: var(--bg-popover-sub);
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stats-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .stats-row-name {
+      color: var(--text-header);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stats-row-sub {
+      color: var(--text-level);
+      font-size: 12px;
+    }
+
+    .stats-row-val {
+      color: var(--text-header);
+      font-weight: 500;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    /* ==========================================================================
+       CHAT FEED (#000000, 17px #d3d5d9, SCROLLS UNDER FLOATING BOTTOM DOCK)
+       ========================================================================== */
+    .chat-feed {
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      background-color: var(--bg-canvas);
+      padding: 8px 16px 220px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      scroll-behavior: smooth;
+    }
+
+    .chat-empty {
+      margin: auto 0;
+      text-align: center;
+      padding: 40px 20px 120px;
+      color: var(--text-dim);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .chat-empty-title {
+      font-size: 19px;
+      font-weight: 500;
+      color: var(--text-level);
+    }
+
+    .msg-block {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+
+    /* User Card: right-aligned, max-width 88%, #151618, 20px radius */
+    .user-card {
+      align-self: flex-end;
+      max-width: 88%;
+      background-color: var(--bg-user-card);
+      border-radius: var(--radius-card);
+      padding: 12px 16px;
+      transition: background-color 0.14s ease;
+    }
+
+    .user-card.collapsed {
+      cursor: pointer;
+    }
+
+    /* Gemini iOS Body Typography (.msg-body) */
+    .msg-body {
+      font-family: var(--font-sans);
+      font-size: 17px;
+      line-height: 1.52;
+      font-weight: 400;
+      letter-spacing: -0.005em;
+      font-optical-sizing: auto;
+      font-variation-settings: "opsz" 17;
+      color: var(--text-chat);
+      word-break: break-word;
+    }
+
+    .user-card .msg-body {
+      white-space: pre-wrap;
+    }
+
+    .ai-content {
+      width: 100%;
+    }
+
+    .ai-content p + p,
+    .ai-content p + ul,
+    .ai-content ul + p {
+      margin-top: 11px;
+    }
+
+    .ai-content ul {
+      padding-left: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .ai-content strong {
+      color: var(--text-header);
+      font-weight: 500;
+    }
+
+    /* Inline code chips: Google Sans Code 15px, #1e1f20, #c4c7c5, 6px radius */
+    .msg-body code {
+      font-family: var(--font-mono);
+      font-size: 15px;
+      background-color: var(--bg-code);
+      color: var(--text-code);
+      padding: 2px 6px;
+      border-radius: 6px;
+      letter-spacing: 0;
+      font-variation-settings: normal;
+    }
+
+    /* 3-Line Collapse with Surface-Matched Bottom Fade Mask */
+    .clamped {
+      position: relative;
+      max-height: calc(17px * 1.52 * 3);
+      overflow: hidden;
+    }
+
+    .user-card .clamped::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 1.75em;
+      background: linear-gradient(180deg, rgba(21, 22, 24, 0) 0%, #151618 92%);
+      pointer-events: none;
+    }
+
+    .ai-content.clamped::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 1.75em;
+      background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, #000000 92%);
+      pointer-events: none;
+    }
+
+    /* LIVE-ONLY Gemini 3-Dot Orbital Thinking Indicator (14px, #a8abb0) */
+    .live-thinking-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 0 6px;
+    }
+
+    .gemini-dot-spinner {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+      position: relative;
+      animation: orbitSpin 1.8s linear infinite;
+    }
+
+    .gemini-dot-spinner span {
+      position: absolute;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background-color: #c4c7c5;
+      animation: dotPulse 1.2s ease-in-out infinite;
+    }
+
+    .gemini-dot-spinner span:nth-child(1) {
+      top: 1px;
+      left: 7px;
+      animation-delay: 0s;
+    }
+
+    .gemini-dot-spinner span:nth-child(2) {
+      bottom: 2px;
+      left: 2px;
+      animation-delay: 0.4s;
+    }
+
+    .gemini-dot-spinner span:nth-child(3) {
+      bottom: 2px;
+      right: 2px;
+      animation-delay: 0.8s;
+    }
+
+    @keyframes orbitSpin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    @keyframes dotPulse {
+      0%, 100% { opacity: 0.35; transform: scale(0.8); }
+      50% { opacity: 1; transform: scale(1.15); }
+    }
+
+    .live-thinking-text {
+      font-size: 14px;
+      line-height: 1.4;
+      color: var(--text-thinking);
+      letter-spacing: -0.005em;
+      animation: thinkingFade 1.5s ease-in-out infinite;
+    }
+
+    @keyframes thinkingFade {
+      0%, 100% { opacity: 0.65; }
+      50% { opacity: 1; }
+    }
+
+    .stream-cursor {
+      display: inline-block;
+      width: 7px;
+      height: 17px;
+      background: var(--text-level);
+      vertical-align: -2px;
+      margin-left: 3px;
+      border-radius: 2px;
+      animation: blink 0.85s infinite;
+    }
+
+    @keyframes blink {
+      0%, 50% { opacity: 1; }
+      51%, 100% { opacity: 0.15; }
+    }
+
+    /* Unified Right-Aligned 5-Icon Dim Message Footer (#58585e, NO inline timestamp)
+       Exact order: Copy -> Delete -> Speak -> ••• -> Collapse */
+    .msg-footer {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      margin-top: 6px;
+      padding: 0 2px;
+      min-height: 30px;
+      width: 100%;
+    }
+
+    .msg-actions {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .msg-icon-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      color: var(--text-dim);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.14s ease, background-color 0.14s ease, transform 0.1s ease;
+    }
+
+    .msg-icon-btn:active {
+      background-color: #1c1e22;
+      color: var(--text-header);
+      transform: scale(0.92);
+    }
+
+    .msg-icon-btn.active {
+      color: var(--text-header);
+    }
+
+    .msg-icon-btn.speaking {
+      color: var(--text-bright);
+      animation: speakPulse 1.1s ease-in-out infinite;
+    }
+
+    @keyframes speakPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
+    }
+
+    .msg-icon-btn svg {
+      width: 16px;
+      height: 16px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .msg-icon-btn.collapse-btn.is-expanded svg {
+      transform: rotate(180deg);
+    }
+
+    /* ==========================================================================
+       TRANSPARENT FLOATING BOTTOM DOCK + SCROLL-TO-BOTTOM + TIER-2 + COMPOSER
+       ========================================================================== */
+    .bottom-dock {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 40;
+      background: transparent;
+      pointer-events: none;
+      padding-top: 4px;
+      padding-bottom: calc(max(22px, env(safe-area-inset-bottom)) + 14px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    @media (min-width: 520px) {
+      .bottom-dock {
+        max-width: 390px;
+        margin: 0 auto;
+      }
+    }
+
+    /* Centered 38x38 Borderless Circular Scroll-to-Bottom Button */
+    .scroll-bottom-btn {
+      position: absolute;
+      bottom: calc(100% + 10px);
+      left: 50%;
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background-color: var(--bg-scroll-btn);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.68);
+      color: #e6e8ec;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, 8px) scale(0.92);
+      transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.14s ease;
+    }
+
+    .scroll-bottom-btn.visible {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translate(-50%, 0) scale(1);
+    }
+
+    .scroll-bottom-btn:active {
+      background-color: var(--bg-scroll-btn-active);
+      transform: translate(-50%, 0) scale(0.93);
+    }
+
+    .scroll-bottom-btn svg {
+      width: 19px;
+      height: 19px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* Slide-up Voice Settings Panel (borderless #22242b) */
+    .voice-dock {
+      display: none;
+      pointer-events: auto;
+      margin: 0 12px 10px;
+      background-color: var(--bg-voice-panel);
+      border-radius: 22px;
+      padding: 12px;
+      flex-direction: column;
+      gap: 11px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.78);
+      animation: slideUpFade 0.16s ease;
+    }
+
+    .voice-dock.open {
+      display: flex;
+    }
+
+    @keyframes slideUpFade {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Top row: 4 equal-width Voice 1..4 buttons + Save */
+    .vp-presets-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+    }
+
+    .vp-preset-btn {
+      flex: 1;
+      min-width: 0;
+      height: 33px;
+      padding: 0 4px;
+      border-radius: var(--radius-pill);
+      background-color: var(--bg-voice-btn);
+      font-size: 12px;
+      font-weight: 500;
+      color: #c8ccd4;
+      white-space: nowrap;
+      transition: background-color 0.14s ease, color 0.14s ease, transform 0.1s ease;
+    }
+
+    .vp-preset-btn:active {
+      transform: scale(0.96);
+    }
+
+    .vp-preset-btn.active {
+      background-color: var(--pill-light-bg);
+      color: var(--pill-light-text);
+      font-weight: 600;
+    }
+
+    .vp-save-btn {
+      flex-shrink: 0;
+      height: 33px;
+      padding: 0 13px;
+      border-radius: var(--radius-pill);
+      background-color: var(--bg-voice-btn-elev);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-header);
+      white-space: nowrap;
+      transition: background-color 0.14s ease, color 0.14s ease;
+    }
+
+    .vp-save-btn:active {
+      background-color: var(--bg-composer-btn-active);
+    }
+
+    .vp-save-btn.saved {
+      background-color: var(--pill-light-bg);
+      color: var(--pill-light-text);
+    }
+
+    /* Middle row: "Голос:" + custom non-zooming upward popover */
+    .vp-voice-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .vp-voice-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: #b4b9c2;
+      flex-shrink: 0;
+    }
+
+    .vp-voice-select {
+      flex: 1;
+      height: 36px;
+      padding: 0 12px;
+      border-radius: 12px;
+      background-color: var(--bg-voice-btn);
+      color: var(--text-header);
+      font-size: 14px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      transition: background-color 0.14s ease;
+    }
+
+    .vp-voice-select:active,
+    .vp-voice-select.open {
+      background-color: var(--bg-voice-btn-elev);
+    }
+
+    .vp-voice-select .chev {
+      width: 14px;
+      height: 14px;
+      stroke: #b4b9c2;
+      fill: none;
+      stroke-width: 2.1;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      transition: transform 0.16s ease;
+    }
+
+    .vp-voice-select.open .chev {
+      transform: rotate(180deg);
+    }
+
+    /* Sliders: Speed & Pitch */
+    .vp-sliders {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .slider-head {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #b4b9c2;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .slider-head strong {
+      color: var(--text-header);
+      font-weight: 500;
+    }
+
+    input[type="range"].mono-range {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: var(--radius-pill);
+      background: #3d414b;
+      outline: none;
+    }
+
+    input[type="range"].mono-range::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--text-header);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+      cursor: pointer;
+    }
+
+    /* ==========================================================================
+       TIER-2 BAR — EXACT 3 BUTTONS: Balance (Left) · Voice (Center) · Auto TTS (Right)
+       Unified typography (Google Sans, 12.5px, 400) & softly muted text (#9a9fa8)
+       ========================================================================== */
+    .tier2-bar {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      padding: 0 12px 9px;
+      width: 100%;
+      pointer-events: none;
+    }
+
+    .t2-pill {
+      pointer-events: auto;
+      height: 31px;
+      padding: 0 11px;
+      border-radius: var(--radius-pill);
+      background-color: var(--bg-tier2-pill);
+      -webkit-backdrop-filter: blur(16px);
+      backdrop-filter: blur(16px);
+      font-family: var(--font-sans);
+      font-size: 12.5px;
+      font-weight: 400;
+      line-height: 1.2;
+      letter-spacing: -0.005em;
+      color: var(--text-tier2);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      white-space: nowrap;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+      transition: background-color 0.14s ease, color 0.14s ease, transform 0.1s ease;
+    }
+
+    .t2-pill:active {
+      transform: scale(0.97);
+    }
+
+    .t2-pill.balance-pill {
+      justify-self: start;
+      font-variant-numeric: tabular-nums;
+      gap: 4px;
+    }
+
+    .t2-pill.balance-pill svg {
+      width: 13px;
+      height: 13px;
+      flex-shrink: 0;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.85;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .t2-pill.voice-pill {
+      justify-self: center;
+      max-width: 100%;
+      min-width: 0;
+    }
+
+    .t2-pill.voice-pill .lbl {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .t2-pill.auto-tts-pill {
+      justify-self: end;
+    }
+
+    .t2-pill .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #6c717c;
+      flex-shrink: 0;
+      transition: background-color 0.14s ease;
+    }
+
+    .t2-pill.active,
+    .t2-pill.open {
+      background-color: var(--bg-tier2-pill-active);
+      color: var(--text-tier2-active);
+    }
+
+    .t2-pill.active .dot {
+      background-color: var(--text-tier2-active);
+    }
+
+    /* ==========================================================================
+       +20% TALLER BRIGHTER BORDERLESS COMPOSER CAPSULE (72px, 50px BUTTONS)
+       ========================================================================== */
+    .composer-capsule {
+      pointer-events: auto;
+      margin: 0 12px;
+      min-height: 72px;
+      border-radius: 36px;
+      background: var(--bg-composer);
+      -webkit-backdrop-filter: blur(18px);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 12px 34px rgba(0, 0, 0, 0.62);
+      padding: 11px;
+      display: grid;
+      grid-template-columns: 50px minmax(0, 1fr) 50px 50px;
+      grid-template-areas: "plus input mic send";
+      align-items: center;
+      gap: 8px;
+      transition:
+        border-radius 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        padding 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .composer-capsule.is-expanded {
+      border-radius: 26px;
+      padding: 13px 11px 10px;
+      grid-template-columns: 50px minmax(0, 1fr) 50px 50px;
+      grid-template-rows: auto 50px;
+      grid-template-areas:
+        "input input input input"
+        "plus  .     mic   send";
+      row-gap: 10px;
+      column-gap: 8px;
+      align-items: center;
+    }
+
+    .cap-btn.plus-btn { grid-area: plus; }
+    .cap-btn.mic-btn  { grid-area: mic; }
+    .cap-btn.send-btn { grid-area: send; }
+
+    .composer-input-wrap {
+      grid-area: input;
+      position: relative;
+      min-width: 0;
+      width: 100%;
+      display: flex;
+      align-items: center;
+    }
+
+    .composer-capsule.is-expanded .composer-input-wrap {
+      padding: 0 5px;
+      align-items: flex-start;
+    }
+
+    /* 50x50 circular #41454f buttons with 24x24 icons */
+    .cap-btn {
+      width: 50px;
+      height: 50px;
+      flex-shrink: 0;
+      border-radius: 50%;
+      background-color: var(--bg-composer-btn);
+      color: var(--text-btn-bright);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.14s ease, color 0.14s ease, transform 0.1s ease, opacity 0.16s ease;
+    }
+
+    .cap-btn:active {
+      background-color: var(--bg-composer-btn-active);
+      transform: scale(0.92);
+    }
+
+    .cap-btn svg {
+      width: 24px;
+      height: 24px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.95;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* Pulsing recording red #7a292e while recording */
+    .cap-btn.mic-btn.recording {
+      background-color: var(--bg-mic-rec);
+      color: var(--text-bright);
+      box-shadow: 0 0 0 3px rgba(240, 93, 98, 0.28);
+      animation: micPulseRed 1.15s ease-in-out infinite;
+    }
+
+    @keyframes micPulseRed {
+      0%, 100% { box-shadow: 0 0 0 2px rgba(240, 93, 98, 0.22); }
+      50% { box-shadow: 0 0 0 6px rgba(240, 93, 98, 0.46); }
+    }
+
+    /* Spinner state while transcribing */
+    .cap-btn.mic-btn.transcribing {
+      background-color: var(--bg-mic-transcribing);
+      color: var(--text-header);
+    }
+
+    .mic-spinner-svg {
+      width: 22px;
+      height: 22px;
+      animation: orbitSpin 0.85s linear infinite;
+    }
+
+    .cap-btn.send-btn.ready {
+      background-color: var(--bg-send-ready);
+      color: var(--text-bright);
+    }
+
+    .cap-btn.send-btn.streaming {
+      background-color: var(--bg-send-stop);
+      color: var(--text-bright);
+    }
+
+    /* Single persistent 18px <textarea> (#c8cbd0 text/caret, #7a7e86 placeholder) */
+    .chat-textarea {
+      width: 100%;
+      font-size: 18px !important;
+      font-weight: 400;
+      line-height: 1.38;
+      padding: 0 4px;
+      min-height: 25px;
+      max-height: 156px;
+      resize: none;
+      color: var(--text-input);
+      caret-color: var(--text-input);
+      overflow-y: hidden;
+      letter-spacing: -0.005em;
+      display: block;
+    }
+
+    .composer-capsule.is-expanded .chat-textarea {
+      padding: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Reserve right padding when clear × button is visible */
+    .composer-input-wrap.has-text .chat-textarea {
+      padding-right: 28px;
+    }
+
+    .chat-textarea::placeholder {
+      color: var(--text-placeholder);
+    }
+
+    /* Clear × button (24x24, #848891) */
+    .clear-input-btn {
+      position: absolute;
+      right: 2px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--text-clear-x);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.14s ease, color 0.12s ease;
+    }
+
+    .composer-input-wrap.has-text .clear-input-btn {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .composer-capsule.is-expanded .clear-input-btn {
+      right: 2px;
+      top: auto;
+      bottom: 4px;
+      transform: none;
+    }
+
+    .clear-input-btn:active {
+      color: var(--text-header);
+    }
+
+    .clear-input-btn svg {
+      width: 13px;
+      height: 13px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2.1;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* Recording / Transcribing inline status inside composer */
+    .mic-status-bar {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      font-size: 16px;
+      color: var(--text-input);
+      font-variant-numeric: tabular-nums;
+      padding-left: 4px;
+      min-width: 0;
+      width: 100%;
+    }
+
+    .mic-status-bar.active {
+      display: flex;
+    }
+
+    .rec-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background-color: var(--rec-red);
+      animation: blink 1s infinite;
+    }
+
+    .rec-dot.hidden {
+      display: none;
+    }
+
+    .rec-hint {
+      font-size: 14px;
+      color: #b4b9c4;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ==========================================================================
+       LEFT SIDE DRAWER (BORDERLESS #111113, NO BOTTOM FOOTER)
+       ========================================================================== */
+    .drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 70;
+      background: rgba(0, 0, 0, 0.64);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.22s ease;
+    }
+
+    .drawer-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .drawer {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 80;
+      width: min(86vw, 330px);
+      background-color: var(--bg-drawer);
+      box-shadow: 16px 0 48px rgba(0, 0, 0, 0.78);
+      transform: translateX(-104%);
+      transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+      padding-top: calc(var(--safe-top) + 10px);
+      padding-bottom: calc(var(--safe-bottom) + 16px);
+    }
+
+    .drawer.open {
+      transform: translateX(0);
+    }
+
+    .drawer-top-bar {
+      flex-shrink: 0;
+      padding: 2px 12px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .drawer-brand {
+      font-size: 17px;
+      font-weight: 500;
+      color: var(--text-header);
+      letter-spacing: -0.01em;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .drawer-brand span {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-level);
+      margin-left: 7px;
+      padding: 2px 8px;
+      border-radius: var(--radius-pill);
+      background: var(--bg-drawer-plaque);
+    }
+
+    /* Exact 44x44 borderless close button */
+    .drawer-close-btn {
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
+      min-height: 44px;
+      flex: 0 0 44px;
+      border-radius: 50%;
+      background-color: var(--bg-header-btn);
+      color: var(--text-header);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.14s ease, transform 0.1s ease;
+    }
+
+    .drawer-close-btn:active {
+      background-color: var(--bg-header-btn-active);
+      transform: scale(0.92);
+    }
+
+    .drawer-close-btn svg {
+      width: 19px;
+      height: 19px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .drawer-content {
+      flex-shrink: 0;
+      padding: 0 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* Provider Segmented Switch */
+    .segmented-ctrl {
+      flex-shrink: 0;
+      background-color: var(--bg-drawer-plaque);
+      border-radius: var(--radius-pill);
+      padding: 3px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3px;
+    }
+
+    .seg-btn {
+      height: 34px;
+      border-radius: var(--radius-pill);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-level);
+      transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .seg-btn.active {
+      background-color: var(--bg-drawer-tab-active);
+      color: var(--text-header);
+    }
+
+    /* Collapsible API Keys Accordion (flex-shrink: 0, 0fr -> 1fr, zero clipping) */
+    .drawer-section-card {
+      flex-shrink: 0;
+      background-color: var(--bg-drawer-plaque);
+      border-radius: 16px;
+    }
+
+    .accordion-trigger {
+      width: 100%;
+      padding: 12px 13px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-header);
+    }
+
+    .accordion-trigger .chev {
+      width: 14px;
+      height: 14px;
+      color: var(--text-level);
+      transition: transform 0.2s ease;
+    }
+
+    .accordion-trigger.open .chev {
+      transform: rotate(180deg);
+    }
+
+    .accordion-collapse {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .accordion-collapse.open {
+      grid-template-rows: 1fr;
+    }
+
+    .accordion-inner {
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .accordion-body {
+      padding: 2px 13px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .field-label {
+      font-size: 12px;
+      color: var(--text-level);
+    }
+
+    .input-wrap {
+      display: flex;
+      align-items: center;
+      background-color: var(--bg-drawer-input);
+      border-radius: 11px;
+      padding: 0 8px 0 11px;
+      height: 40px;
+    }
+
+    .input-wrap input {
+      flex: 1;
+      min-width: 0;
+      color: var(--text-header);
+    }
+
+    .input-wrap input::placeholder {
+      color: var(--text-dim);
+    }
+
+    .eye-btn {
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-level);
+      flex-shrink: 0;
+    }
+
+    /* Chat History Section + Compact Dual-Zone Scrollable List (75dvh) */
+    .chat-list-section {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .chat-list-header {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 2px 0 2px 4px;
+    }
+
+    .chat-list-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .drawer-list-title {
+      font-size: 12px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-level);
+    }
+
+    .sel-count-badge {
+      display: none;
+      min-width: 20px;
+      height: 18px;
+      padding: 0 6px;
+      border-radius: var(--radius-pill);
+      background-color: var(--bg-drawer-tab-active);
+      color: var(--text-header);
+      font-size: 11px;
+      font-weight: 600;
+      align-items: center;
+      justify-content: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .sel-count-badge.visible {
+      display: inline-flex;
+    }
+
+    .chat-bulk-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding-right: 3px;
+    }
+
+    .bulk-ico-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 9px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-level);
+      transition: background-color 0.14s ease, color 0.14s ease, transform 0.1s ease;
+    }
+
+    .bulk-ico-btn:active {
+      background-color: var(--bg-drawer-tab-active);
+      transform: scale(0.92);
+    }
+
+    .bulk-ico-btn svg {
+      width: 16px;
+      height: 16px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.85;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .bulk-ico-btn.trash-btn {
+      color: var(--text-disabled);
+    }
+
+    .bulk-ico-btn.trash-btn.has-selection {
+      color: var(--text-bright);
+      background-color: var(--bg-drawer-tab-active);
+    }
+
+    .chat-list {
+      max-height: 75dvh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+      touch-action: pan-y;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding-bottom: 6px;
+    }
+
+    .chat-item {
+      flex-shrink: 0;
+      display: flex;
+      align-items: stretch;
+      border-radius: 12px;
+      background-color: transparent;
+      overflow: hidden;
+      touch-action: pan-y;
+      transition: background-color 0.14s ease;
+    }
+
+    .chat-item.active {
+      background-color: var(--bg-drawer-row-active);
+    }
+
+    .chat-item.selected {
+      background-color: var(--bg-drawer-row-selected);
+    }
+
+    .chat-item.context-highlight {
+      background-color: var(--bg-drawer-row-ctx);
+    }
+
+    .chat-item-main {
+      flex: 1;
+      min-width: 0;
+      padding: 8px 4px 8px 10px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+      text-align: left;
+      touch-action: pan-y;
+    }
+
+    .chat-item-main:active {
+      opacity: 0.78;
+    }
+
+    .chat-item-title {
+      font-size: 14px;
+      line-height: 1.28;
+      font-weight: 500;
+      color: var(--text-header);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chat-item.active .chat-item-title {
+      color: var(--text-bright);
+    }
+
+    .chat-item-meta {
+      font-size: 11px;
+      line-height: 1.2;
+      color: var(--text-sub);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Inline Rename Input (16px strictly) */
+    .chat-rename-input {
+      width: 100%;
+      background-color: #2b2e36;
+      border-radius: 8px;
+      padding: 4px 8px;
+      color: var(--text-bright);
+      line-height: 1.25;
+      font-weight: 500;
+    }
+
+    /* Tiny 11.5px pushpin SVG immediately to the left of select checkbox */
+    .chat-pin-indicator {
+      flex-shrink: 0;
+      width: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-level);
+      pointer-events: none;
+    }
+
+    .chat-pin-indicator svg {
+      width: 11.5px;
+      height: 11.5px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      transform: rotate(35deg);
+    }
+
+    /* Right Swipe-Select Column: 36px wide, touch-action: none */
+    .chat-check-col {
+      width: 36px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      touch-action: none;
+    }
+
+    /* Borderless 18x18 circular tonal checkbox */
+    .ios-checkbox {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background-color: var(--bg-checkbox-off);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition:
+        background-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+        transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+      pointer-events: none;
+    }
+
+    .ios-checkbox svg {
+      width: 10px;
+      height: 10px;
+      stroke: var(--pill-light-text);
+      fill: none;
+      stroke-width: 2.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: 0;
+      transform: scale(0.45);
+      transition:
+        opacity 140ms cubic-bezier(0.22, 1, 0.36, 1),
+        transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .chat-item.selected .ios-checkbox {
+      background-color: var(--pill-light-bg);
+      transform: scale(1.06);
+    }
+
+    .chat-item.selected .ios-checkbox svg {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .chat-list-empty {
+      padding: 18px 8px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    /* ==========================================================================
+       BORDERLESS LONG-PRESS CONTEXT MENU (ПЕРЕИМЕНОВАТЬ + PIN)
+       ========================================================================== */
+    .ctx-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 85;
+      background: rgba(0, 0, 0, 0.34);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.14s ease;
+    }
+
+    .ctx-backdrop.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .ctx-menu {
+      position: absolute;
+      z-index: 90;
+      width: 198px;
+      padding: 5px;
+      background-color: var(--bg-ctx-menu);
+      border-radius: 16px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.82);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      opacity: 0;
+      transform: translateY(-4px) scale(0.96);
+      pointer-events: none;
+      transition: opacity 0.14s ease, transform 0.14s ease;
+    }
+
+    .ctx-menu.drop-up {
+      transform: translateY(4px) scale(0.96);
+    }
+
+    .ctx-menu.open {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .ctx-item {
+      width: 100%;
+      padding: 11px 12px;
+      border-radius: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 14.5px;
+      font-weight: 400;
+      color: var(--text-header);
+      text-align: left;
+      transition: background-color 0.12s ease;
+    }
+
+    .ctx-item:active {
+      background-color: var(--bg-surface-hover);
+    }
+
+    .ctx-item-left {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .ctx-item svg {
+      width: 15px;
+      height: 15px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.85;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      flex-shrink: 0;
+    }
+
+    .ctx-pin-box {
+      width: 18px;
+      height: 18px;
+      border-radius: 5px;
+      background-color: #343740;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.14s ease;
+    }
+
+    .ctx-pin-box svg {
+      width: 11px;
+      height: 11px;
+      stroke: var(--pill-light-text);
+      stroke-width: 2.8;
+      opacity: 0;
+    }
+
+    .ctx-item.is-pinned .ctx-pin-box {
+      background-color: var(--pill-light-bg);
+    }
+
+    .ctx-item.is-pinned .ctx-pin-box svg {
+      opacity: 1;
+    }
+
+    /* ==========================================================================
+       BORDERLESS TOAST (NO alert() / confirm())
+       ========================================================================== */
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(max(22px, env(safe-area-inset-bottom)) + 146px);
+      transform: translateX(-50%) translateY(10px);
+      z-index: 95;
+      background-color: #282b33;
+      color: var(--text-header);
+      font-size: 13px;
+      padding: 8px 15px;
+      border-radius: var(--radius-pill);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.78);
+      white-space: nowrap;
+      max-width: calc(100% - 28px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell" id="appShell">
+
+    <!-- =====================================================================
+         1. TOP HEADER — 2 ROWS, SEAMLESS #000000, NO BALANCE IN HEADER
+         ===================================================================== -->
+    <header class="top-header" id="topHeader">
+      <!-- Left: Exact 44x44 Circular Menu Button -->
+      <button class="hdr-circle-btn" id="btn-menu" aria-label="Меню">
+        <svg viewBox="0 0 24 24">
+          <line x1="4" y1="9" x2="20" y2="9"></line>
+          <line x1="4" y1="15" x2="20" y2="15"></line>
+        </svg>
+      </button>
+
+      <!-- Center 2 Pure-Text Rows -->
+      <div class="header-center">
+        <!-- Row 1: Centered Model + Thinking Level trigger -->
+        <div class="hdr-row-1">
+          <button class="gemini-model-trigger" id="modelDropdownBtn" data-popover="model" aria-label="Выбрать модель">
+            <span class="gmt-model" id="modelBtnLabel">4 Argon</span>
+            <span class="gmt-level" id="thinkingBtnLabel">High</span>
+            <svg class="gmt-chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+        </div>
+
+        <!-- Row 2: Stretched Full-Width TTS & STT Names -->
+        <div class="hdr-row-2">
+          <button class="meta-trigger" id="ttsDropdownBtn" data-popover="tts" aria-label="Движок озвучки TTS">
+            <svg class="row2-ico" viewBox="0 0 24 24">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+            </svg>
+            <span class="lbl" id="ttsBtnLabel">Gemini 3.8 Flash-Lite TTS</span>
+            <svg class="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+
+          <button class="meta-trigger stt-trigger" id="sttDropdownBtn" data-popover="stt" aria-label="Движок микрофона STT">
+            <svg class="row2-ico" viewBox="0 0 24 24">
+              <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+              <path d="M5 10a7 7 0 0 0 14 0"></path>
+              <line x1="12" y1="19" x2="12" y2="22"></line>
+            </svg>
+            <span class="lbl" id="sttBtnLabel">Whisper Large v3</span>
+            <svg class="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Right: Exact 44x44 Circular New Chat Button -->
+      <button class="hdr-circle-btn" id="btn-new-chat" aria-label="Новый чат">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 20h9"></path>
+          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
+        </svg>
+      </button>
+    </header>
+
+    <!-- =====================================================================
+         2. CHAT FEED (#000000, SCROLLS CLEANLY UNDERNEATH FLOATING BOTTOM DOCK)
+         ===================================================================== -->
+    <main class="chat-feed" id="chatFeed"></main>
+
+    <!-- =====================================================================
+         3. TRANSPARENT FLOATING BOTTOM DOCK + SCROLL-TO-BOTTOM + TIER-2 + COMPOSER
+         ===================================================================== -->
+    <section class="bottom-dock" id="bottomDock">
+      <!-- Centered 38x38 Borderless Circular Scroll-to-Bottom Button -->
+      <button class="scroll-bottom-btn" id="scrollBottomBtn" aria-label="Прокрутить вниз">
+        <svg viewBox="0 0 24 24">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <polyline points="6 13 12 19 18 13"></polyline>
+        </svg>
+      </button>
+
+      <!-- Slide-up Voice Settings Panel (borderless #22242b) -->
+      <div class="voice-dock" id="voicePanel">
+        <div class="vp-presets-row" id="presetGroup">
+          <button class="vp-preset-btn active" data-preset="Voice 1">Voice 1</button>
+          <button class="vp-preset-btn" data-preset="Voice 2">Voice 2</button>
+          <button class="vp-preset-btn" data-preset="Voice 3">Voice 3</button>
+          <button class="vp-preset-btn" data-preset="Voice 4">Voice 4</button>
+          <button class="vp-save-btn" id="savePresetBtn">Save</button>
+        </div>
+
+        <div class="vp-voice-row">
+          <span class="vp-voice-label">Голос:</span>
+          <button class="vp-voice-select" id="voiceSelectBtn" data-popover="voice">
+            <span id="voiceSelectLabel">Puck</span>
+            <svg class="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+        </div>
+
+        <div class="vp-sliders">
+          <div class="slider-group">
+            <div class="slider-head">
+              <span>Speed</span>
+              <strong id="speedVal">1.15x</strong>
+            </div>
+            <input type="range" class="mono-range" id="speedSlider" min="0.70" max="1.60" step="0.05" value="1.15">
+          </div>
+          <div class="slider-group">
+            <div class="slider-head">
+              <span>Pitch</span>
+              <strong id="pitchVal">1.00x</strong>
+            </div>
+            <input type="range" class="mono-range" id="pitchSlider" min="0.75" max="1.25" step="0.01" value="1.00">
+          </div>
+        </div>
+      </div>
+
+      <!-- TIER-2 BAR: EXACT 3 BUTTONS (Balance Left · Voice Center · Auto TTS Right) -->
+      <div class="tier2-bar">
+        <button class="t2-pill balance-pill" id="statsDropdownBtn" data-popover="stats" aria-label="Баланс и расходы">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"></circle>
+            <path d="M14.8 9.2c-.5-.8-1.5-1.2-2.7-1.2-1.5 0-2.6.8-2.6 1.9 0 1.2 1 1.7 2.6 2 1.7.3 2.8.9 2.8 2.1 0 1.2-1.2 2-2.9 2-1.3 0-2.4-.5-3-1.3"></path>
+            <line x1="12" y1="6.3" x2="12" y2="8"></line>
+            <line x1="12" y1="16" x2="12" y2="17.7"></line>
+          </svg>
+          <span id="balanceBtnVal">0.000$</span>
+        </button>
+
+        <button class="t2-pill voice-pill" id="voiceDockBtn" aria-label="Настройки голоса">
+          <span class="lbl" id="voiceDockLabel">Voice: Voice 1, Puck</span>
+        </button>
+
+        <button class="t2-pill auto-tts-pill" id="autoTtsBtn" aria-pressed="false">
+          <span class="dot"></span>
+          <span>Auto TTS</span>
+        </button>
+      </div>
+
+      <!-- +20% Taller Brighter Borderless Composer Capsule (72px, 50px buttons) -->
+      <div class="composer-capsule" id="composerCapsule">
+        <button class="cap-btn plus-btn" id="attachBtn" aria-label="Прикрепить">
+          <svg viewBox="0 0 24 24">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+
+        <div class="composer-input-wrap" id="composerInputWrap">
+          <textarea class="chat-textarea" id="chatInput" rows="1" placeholder="Сообщение…"></textarea>
+          <button class="clear-input-btn" id="btn-clear-input" type="button" aria-label="Очистить поле ввода">
+            <svg viewBox="0 0 24 24">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+          <div class="mic-status-bar" id="micStatusBar">
+            <span class="rec-dot" id="recDot"></span>
+            <span id="micStatusTimer">0:00</span>
+            <span class="rec-hint" id="micStatusHint">Запись…</span>
+          </div>
+        </div>
+
+        <button class="cap-btn mic-btn" id="btn-mic" aria-label="Микрофон">
+          <svg id="micIconSvg" viewBox="0 0 24 24">
+            <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+            <path d="M5 10a7 7 0 0 0 14 0"></path>
+            <line x1="12" y1="19" x2="12" y2="22"></line>
+          </svg>
+        </button>
+
+        <button class="cap-btn send-btn" id="sendBtn" aria-label="Отправить">
+          <svg id="sendIconSvg" viewBox="0 0 24 24">
+            <line x1="12" y1="19" x2="12" y2="5"></line>
+            <polyline points="6 11 12 5 18 11"></polyline>
+          </svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- =====================================================================
+         4. LEFT SIDE DRAWER (BORDERLESS #111113, NO BOTTOM FOOTER)
+         ===================================================================== -->
+    <div class="drawer-backdrop" id="drawerBackdrop"></div>
+    <aside class="drawer" id="drawer" aria-hidden="true">
+      <div class="drawer-top-bar">
+        <div class="drawer-brand">OpenRouter <span>PWA</span></div>
+        <button class="drawer-close-btn" id="closeDrawerBtn" aria-label="Закрыть меню">
+          <svg viewBox="0 0 24 24">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="drawer-content">
+        <!-- Borderless Provider Segmented Switch -->
+        <div class="segmented-ctrl" id="providerSwitch">
+          <button class="seg-btn active" data-provider="openrouter">OpenRouter</button>
+          <button class="seg-btn" data-provider="direct">Direct / Custom</button>
+        </div>
+
+        <!-- Collapsible API Keys Accordion (0fr -> 1fr, zero clipping) -->
+        <div class="drawer-section-card">
+          <button class="accordion-trigger" id="apiAccordionBtn" aria-expanded="false">
+            <span>API ключи</span>
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <div class="accordion-collapse" id="apiAccordionCollapse">
+            <div class="accordion-inner">
+              <div class="accordion-body">
+                <div class="field-group">
+                  <label class="field-label" for="orKeyInput">OpenRouter Key</label>
+                  <div class="input-wrap">
+                    <input type="password" id="orKeyInput" placeholder="sk-or-v1-..." autocomplete="off">
+                    <button class="eye-btn" data-toggle-pw="orKeyInput" aria-label="Показать ключ">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="field-group">
+                  <label class="field-label" for="customUrlInput">Custom Endpoint URL</label>
+                  <div class="input-wrap">
+                    <input type="url" id="customUrlInput" placeholder="https://api.example.com/v1" autocomplete="off">
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat History + Right-Aligned Bulk Toolbar -->
+        <div class="chat-list-section">
+          <div class="chat-list-header">
+            <div class="chat-list-title-wrap">
+              <span class="drawer-list-title">ЧАТЫ</span>
+              <span class="sel-count-badge" id="selCountBadge">0</span>
+            </div>
+            <div class="chat-bulk-actions">
+              <button class="bulk-ico-btn trash-btn" id="bulkDeleteBtn" title="Удалить выбранные" aria-label="Удалить выбранные">
+                <svg viewBox="0 0 24 24">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                  <path d="M10 11v6"></path>
+                  <path d="M14 11v6"></path>
+                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
+                </svg>
+              </button>
+              <button class="bulk-ico-btn" id="selectAllBtn" title="Выделить все" aria-label="Выделить все">
+                <svg viewBox="0 0 24 24">
+                  <rect x="3" y="3" width="18" height="18" rx="4"></rect>
+                  <polyline points="8.5 12.5 11 15 16 9.5"></polyline>
+                </svg>
+              </button>
+              <button class="bulk-ico-btn" id="deselectAllBtn" title="Снять выделение" aria-label="Снять выделение">
+                <svg viewBox="0 0 24 24">
+                  <rect x="3" y="3" width="18" height="18" rx="4"></rect>
+                  <line x1="8" y1="12" x2="16" y2="12"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="chat-list" id="chatList"></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- =====================================================================
+         BORDERLESS POPOVERS, LONG-PRESS CONTEXT MENU & TOAST
+         ===================================================================== -->
+    <div class="popover-backdrop" id="popoverBackdrop"></div>
+    <div class="popover-menu" id="popoverMenu"></div>
+
+    <div class="ctx-backdrop" id="ctxBackdrop"></div>
+    <div class="ctx-menu" id="ctxMenu" role="menu"></div>
+
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      /* =====================================================================
+         CONSTANTS & DEMO DATA
+         ===================================================================== */
+      const CHAT_MODELS = [
+        { id: 'google/gemini-4-argon', label: '4 Argon', flexSupported: true },
+        { id: 'google/gemini-4-hydrogen', label: '4 Hydrogen', flexSupported: true },
+        { id: 'google/gemini-3.8-flash', label: '3.8 Flash', flexSupported: true },
+        { id: 'google/gemini-3.5-flash-lite', label: '3.5 Flash-Lite', flexSupported: true },
+        { id: 'google/gemini-2.5-flash-lite', label: '2.5 Flash-Lite', flexSupported: false }
+      ];
+
+      // Ordered High -> None so 'None' is the bottom option (tests the collapse fix directly)
+      const THINKING_LEVELS = [
+        { id: 'high', label: 'High' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'low', label: 'Low' },
+        { id: 'minimal', label: 'Minimal' },
+        { id: 'none', label: 'None' }
+      ];
+
+      const TTS_MODELS = [
+        { id: 'google/gemini-3.8-flash-lite-tts', name: 'Gemini 3.8 Flash-Lite TTS' },
+        { id: 'google/gemini-3.8-flash-tts', name: 'Gemini 3.8 Flash TTS' },
+        { id: 'x-ai/grok-tts', name: 'Grok TTS' },
+        { id: 'elevenlabs-byok', name: 'ElevenLabs BYOK' }
+      ];
+
+      const STT_MODELS = [
+        { id: 'openai/whisper-large-v3', name: 'Whisper Large v3' },
+        { id: 'x-ai/grok-stt-2.0', name: 'Grok STT 2.0' },
+        { id: 'google/gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash-Lite' }
+      ];
+
+      const GEMINI_VOICES = [
+        'Puck', 'Charon', 'Kore', 'Fenrir',
+        'Aoede', 'Zephyr', 'Leda', 'Orus',
+        'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus'
+      ];
+
+      const THINKING_STEPS = [
+        'Анализ контекста запроса…',
+        'Проверка параметров iOS Safari…',
+        'Формирование ответа…'
+      ];
+
+      // 14 compact Russian chats; primary demo chat has 4 messages with code chips & multi-paragraph reply
+      const INITIAL_CHATS = [
+        {
+          id: 'chat-1',
+          title: 'Настройка PWA-интерфейса и блокировки MIC',
+          date: 'Сегодня · 08:05',
+          pinned: false,
+          order: 0,
+          messages: [
+            {
+              id: 'm1',
+              role: 'user',
+              timestamp: '08:01  •  25/11/26',
+              collapsed: false,
+              text: 'Убери просвет полоски под Thinking level при выборе None, перенеси баланс в нижний ряд к Voice и Auto TTS и сделай жёсткую блокировку всего интерфейса на время записи и транскрибации.'
+            },
+            {
+              id: 'm2',
+              role: 'assistant',
+              model: '4 Argon',
+              timestamp: '08:02  •  25/11/26',
+              collapsed: false,
+              html: '<p>Оба блока перестроены без рамок и обводок на сплошном фоне <code>#000000</code>:</p><ul><li><strong>Thinking level:</strong> раскрытая группа получила затемнённую подложку <code>#15161a</code> с радиусом <code>10px</code>, а при сворачивании внешний контейнер схлопывается в <code>0fr</code> с нулевыми отступами и <code>visibility: hidden</code> — выбранный <code>None</code> больше не даёт светлую полосу над <code>Flex</code>.</li><li><strong>Нижняя панель над полем ввода:</strong> <code>Авто-STT</code> удалён; слева перенесён <code>0.000$</code> с открытием детализации вверх, по центру — <code>Voice: Voice 1, Puck</code>, справа — <code>Auto TTS</code>. Все три кнопки приведены к единому <code>Google Sans 12.5px</code> в приглушённом <code>#9a9fa8</code>.</li></ul>',
+              plainText: 'Оба блока перестроены: раскрытая группа Thinking level затемнена до #15161a и полностью скрывается при сворачивании даже при выбранном None; баланс перенесён в нижний ряд влево, по центру Voice: Voice 1, Puck, справа Auto TTS.'
+            },
+            {
+              id: 'm3',
+              role: 'user',
+              timestamp: '08:03  •  25/11/26',
+              collapsed: false,
+              text: 'Как отрабатывает блокировка UI в момент записи с микрофона и во время расшифровки?'
+            },
+            {
+              id: 'm4',
+              role: 'assistant',
+              model: '4 Hydrogen',
+              timestamp: '08:04  •  25/11/26',
+              collapsed: false,
+              html: '<p>При нажатии на кнопку микрофона закрываются любые открытые меню, шторки и поповеры, а на <code>body</code> вешается класс <code>mic-recording</code>. Все остальные кнопки, поля, шапка и элементы ленты получают <code>disabled</code>, <code>pointer-events: none</code> и приглушённую прозрачность — активной остаётся только красная пульсирующая кнопка остановки записи.</p><p>После повторного нажатия для завершения записи включается фаза <code>mic-transcribing</code> (~1.6 сек): внутри кнопки микрофона крутится спиннер, и <strong>вся</strong> панель, включая сам микрофон, полностью некликабельна до завершения распознавания.</p><p>Как только мок-расшифровка завершается, готовый русский текст подставляется в поле ввода, капсула при необходимости автоматически расширяется вверх с появлением крестика <code>×</code> в правом нижнем углу, а все элементы управления мгновенно разблокируются.</p>',
+              plainText: 'При записи активна только кнопка микрофона, все остальные элементы приложения полностью заблокированы. После остановки записи запускается фаза транскрибации (~1.6 сек), во время которой заблокированы все кнопки включая микрофон. По окончании текст вставляется в поле ввода и интерфейс разблокируется.'
+            }
+          ]
+        },
+        {
+          id: 'chat-2',
+          title: 'Разбор уровней H4 EUR/JPY',
+          date: 'Вчера · 22:14',
+          pinned: false,
+          order: 1,
+          messages: [
+            {
+              id: 'c2-m1',
+              role: 'user',
+              timestamp: '22:13  •  24/11/26',
+              collapsed: false,
+              text: 'Где ближайший пул ликвидности по EUR/JPY на H4 и стоит ли ждать слом на M15?'
+            },
+            {
+              id: 'c2-m2',
+              role: 'assistant',
+              model: '4 Argon',
+              timestamp: '22:14  •  24/11/26',
+              collapsed: false,
+              html: '<p>Сверху основной пул стопов лежит за <code>164.85</code>, ближайшая зона спроса на H4 — <code>162.40–162.75</code>. До чёткого слома структуры на M15 контртрендовый вход даёт лишний риск.</p>',
+              plainText: 'Сверху пул стопов лежит за 164.85, зона спроса H4 — 162.40–162.75. Лучше ждать слом структуры на M15.'
+            }
+          ]
+        },
+        {
+          id: 'chat-3',
+          title: 'Сброс audioSession в iOS Safari',
+          date: '24/11/26 · 18:05',
+          pinned: false,
+          order: 2,
+          messages: [
+            {
+              id: 'c3-m1',
+              role: 'user',
+              timestamp: '18:04  •  24/11/26',
+              collapsed: false,
+              text: 'Как гарантированно вернуть вывод с разговорного динамика после MediaRecorder?'
+            },
+            {
+              id: 'c3-m2',
+              role: 'assistant',
+              model: '3.8 Flash',
+              timestamp: '18:05  •  24/11/26',
+              collapsed: false,
+              html: '<p>Сразу после остановки записи закрываем треки через <code>stream.getTracks().forEach(t =&gt; t.stop())</code> и перед стартом озвучки выставляем <code>navigator.audioSession.type = "playback"</code>.</p>',
+              plainText: 'Закрываем все треки микрофона и перед запуском TTS выставляем navigator.audioSession.type = "playback".'
+            }
+          ]
+        },
+        {
+          id: 'chat-4',
+          title: 'Сравнение Gemini 3.8 TTS и Grok',
+          date: '23/11/26 · 15:40',
+          pinned: false,
+          order: 3,
+          messages: [
+            {
+              id: 'c4-m1',
+              role: 'user',
+              timestamp: '15:39  •  23/11/26',
+              collapsed: false,
+              text: 'Какая модель стабильнее держит русский темп на 1.20x без артефактов?'
+            },
+            {
+              id: 'c4-m2',
+              role: 'assistant',
+              model: '4 Hydrogen',
+              timestamp: '15:40  •  23/11/26',
+              collapsed: false,
+              html: '<p>На длинных ответах <code>gemini-3.8-flash-lite-tts</code> держит ровный уровень без клиентского DSP. Первый абзац до 600 знаков откусываем на быстрый старт.</p>',
+              plainText: 'На длинных ответах gemini-3.8-flash-lite-tts держит ровный уровень без клиентского DSP.'
+            }
+          ]
+        },
+        {
+          id: 'chat-5',
+          title: '12V PWM охлаждение и Bluetti',
+          date: '22/11/26 · 11:20',
+          pinned: false,
+          order: 4,
+          messages: [
+            {
+              id: 'c5-m1',
+              role: 'user',
+              timestamp: '11:19  •  22/11/26',
+              collapsed: false,
+              text: 'Сколько тянут два Arctic P9 PST на 60% оборотов через ручной ШИМ?'
+            },
+            {
+              id: 'c5-m2',
+              role: 'assistant',
+              model: '3.5 Flash-Lite',
+              timestamp: '11:20  •  22/11/26',
+              collapsed: false,
+              html: '<p>Около <code>0.8–1.1 Вт</code> суммарно с потерями на контроллере — за ночь разряд минимальный.</p>',
+              plainText: 'Около 0.8–1.1 Вт суммарно с потерями на контроллере.'
+            }
+          ]
+        },
+        {
+          id: 'chat-6',
+          title: 'Курица и брокколи в Instant Pot',
+          date: '21/11/26 · 19:30',
+          pinned: false,
+          order: 5,
+          messages: [
+            {
+              id: 'c6-m1',
+              role: 'user',
+              timestamp: '19:29  •  21/11/26',
+              collapsed: false,
+              text: 'Если закинуть замороженную брокколи сразу с голенями на 10 минут, развалится?'
+            },
+            {
+              id: 'c6-m2',
+              role: 'assistant',
+              model: '2.5 Flash-Lite',
+              timestamp: '19:30  •  21/11/26',
+              collapsed: false,
+              html: '<p>Да, превратится в пюре. Голени держи 10 минут на <code>High Pressure</code>, затем быстрый сброс пара и брокколи на 2–3 минуты на остаточном тепле.</p>',
+              plainText: 'Да, превратится в пюре. Голени 10 минут на High Pressure, брокколи на 2–3 минуты под крышку после сброса пара.'
+            }
+          ]
+        },
+        {
+          id: 'chat-7',
+          title: 'Замена тормозного бустера Prius',
+          date: '20/11/26 · 16:12',
+          pinned: false,
+          order: 6,
+          messages: [
+            {
+              id: 'c7-m1',
+              role: 'user',
+              timestamp: '16:11  •  20/11/26',
+              collapsed: false,
+              text: 'Номер оригинального узла 47050-47180 точно идёт на рестайлинг 2015?'
+            },
+            {
+              id: 'c7-m2',
+              role: 'assistant',
+              model: '4 Argon',
+              timestamp: '16:12  •  20/11/26',
+              collapsed: false,
+              html: '<p>Да, <code>47050-47180</code> покрывает 2012–2015 Prius Gen 3. После установки обязательна линейная калибровка клапанов через Techstream.</p>',
+              plainText: 'Да, 47050-47180 покрывает 2012–2015 Prius Gen 3. После замены нужна калибровка через Techstream.'
+            }
+          ]
+        },
+        {
+          id: 'chat-8',
+          title: 'Сценарий WAV патча sampleRate',
+          date: '19/11/26 · 23:45',
+          pinned: false,
+          order: 7,
+          messages: [
+            {
+              id: 'c8-m1',
+              role: 'user',
+              timestamp: '23:44  •  19/11/26',
+              collapsed: false,
+              text: 'Какие байты в заголовке RIFF WAV нужно переписать при сдвиге питча?'
+            },
+            {
+              id: 'c8-m2',
+              role: 'assistant',
+              model: '4 Argon',
+              timestamp: '23:45  •  19/11/26',
+              collapsed: false,
+              html: '<p>Перезаписываем <code>sampleRate</code> по смещению <code>24</code> и <code>byteRate</code> по смещению <code>28</code> (little-endian uint32), затем компенсируем <code>playbackRate = speed / pitch</code>.</p>',
+              plainText: 'Перезаписываем sampleRate на смещении 24 и byteRate на смещении 28 (uint32 LE), затем playbackRate = speed / pitch.'
+            }
+          ]
+        },
+        {
+          id: 'chat-9',
+          title: 'Фонетика и редукция в английском',
+          date: '18/11/26 · 13:08',
+          pinned: false,
+          order: 8,
+          messages: [
+            {
+              id: 'c9-m1',
+              role: 'user',
+              timestamp: '13:07  •  18/11/26',
+              collapsed: false,
+              text: 'Как естественно звучит "going to have to" в беглой американской речи?'
+            },
+            {
+              id: 'c9-m2',
+              role: 'assistant',
+              model: '4 Hydrogen',
+              timestamp: '13:08  •  18/11/26',
+              collapsed: false,
+              html: '<p>В разговорном потоке связка схлопывается до <code>gonna hafta</code> с безударной швой на конце и мягким переходом без паузы.</p>',
+              plainText: 'В беглой речи связка редуцируется до gonna hafta с безударной швой без паузы.'
+            }
+          ]
+        },
+        {
+          id: 'chat-10',
+          title: 'Защита бейсболки от солевых пятен',
+          date: '17/11/26 · 10:50',
+          pinned: false,
+          order: 9,
+          messages: [
+            {
+              id: 'c10-m1',
+              role: 'user',
+              timestamp: '10:49  •  17/11/26',
+              collapsed: false,
+              text: 'Что лучше держится под лентой кепки в жару — Tegaderm или вкладыши?'
+            },
+            {
+              id: 'c10-m2',
+              role: 'assistant',
+              model: '3.8 Flash',
+              timestamp: '10:50  •  17/11/26',
+              collapsed: false,
+              html: '<p>Тонкая полиуретановая плёнка вроде <code>Tegaderm</code> под штатной лентой полностью блокирует выход соли на внешнюю ткань и не добавляет объёма.</p>',
+              plainText: 'Тонкая полиуретановая плёнка под лентой полностью блокирует выход соли на внешнюю ткань.'
+            }
+          ]
+        },
+        {
+          id: 'chat-11',
+          title: 'Сравнение USD/CHF и CAD/JPY на D1',
+          date: '16/11/26 · 20:15',
+          pinned: false,
+          order: 10,
+          messages: [
+            {
+              id: 'c11-m1',
+              role: 'user',
+              timestamp: '20:14  •  16/11/26',
+              collapsed: false,
+              text: 'Есть ли рассинхрон по корреляции между USD/CHF и DXY на дневке?'
+            },
+            {
+              id: 'c11-m2',
+              role: 'assistant',
+              model: '4 Argon',
+              timestamp: '20:15  •  16/11/26',
+              collapsed: false,
+              html: '<p>На D1 франк отрабатывает защитный спрос чуть быстрее индекса доллара — перед входом сверь реакцию на дневной зоне предложения.</p>',
+              plainText: 'На D1 франк отрабатывает защитный спрос быстрее индекса доллара.'
+            }
+          ]
+        },
+        {
+          id: 'chat-12',
+          title: 'Схема IndexedDB для локальных чатов',
+          date: '15/11/26 · 09:42',
+          pinned: false,
+          order: 11,
+          messages: [
+            {
+              id: 'c12-m1',
+              role: 'user',
+              timestamp: '09:41  •  15/11/26',
+              collapsed: false,
+              text: 'Какие object stores заложить на старте, чтобы не переписывать миграции?'
+            },
+            {
+              id: 'c12-m2',
+              role: 'assistant',
+              model: '4 Argon',
+              timestamp: '09:42  •  15/11/26',
+              collapsed: false,
+              html: '<p>Три стора: <code>chats</code> (мета + updatedAt), <code>messages</code> (индекс по <code>chatId</code>) и <code>settings</code> (ключи, пресеты голоса, дневные траты).</p>',
+              plainText: 'Три стора: chats, messages с индексом по chatId и settings.'
+            }
+          ]
+        },
+        {
+          id: 'chat-13',
+          title: 'Модульный органайзер в багажник',
+          date: '14/11/26 · 17:28',
+          pinned: false,
+          order: 12,
+          messages: [
+            {
+              id: 'c13-m1',
+              role: 'user',
+              timestamp: '17:27  •  14/11/26',
+              collapsed: false,
+              text: 'Какую толщину берёзовой фанеры брать под складную спальную полку?'
+            },
+            {
+              id: 'c13-m2',
+              role: 'assistant',
+              model: '3.5 Flash-Lite',
+              timestamp: '17:28  •  14/11/26',
+              collapsed: false,
+              html: '<p>Оптимальный баланс веса и жёсткости — <code>12 мм</code> с продольным ребром жёсткости; <code>15 мм</code> выдержит без ребра, но заметно тяжелее при сборке.</p>',
+              plainText: 'Оптимально 12 мм с продольным ребром жёсткости либо 15 мм без ребра.'
+            }
+          ]
+        },
+        {
+          id: 'chat-14',
+          title: 'Полифенолы в оливковом масле',
+          date: '12/11/26 · 12:04',
+          pinned: false,
+          order: 13,
+          messages: [
+            {
+              id: 'c14-m1',
+              role: 'user',
+              timestamp: '12:03  •  12/11/26',
+              collapsed: false,
+              text: 'Почему горечь в горле считается маркером высокого олеокантала?'
+            },
+            {
+              id: 'c14-m2',
+              role: 'assistant',
+              model: '4 Hydrogen',
+              timestamp: '12:04  •  12/11/26',
+              collapsed: false,
+              html: '<p>Олеокантал напрямую активирует рецепторы <code>TRPA1</code> в задней части глотки — именно они дают характерное першение свежего раннего отжима.</p>',
+              plainText: 'Олеокантал напрямую активирует рецепторы TRPA1 в глотке, давая характерное першение свежего масла.'
+            }
+          ]
+        }
+      ];
+
+      /* =====================================================================
+         APPLICATION STATE
+         ===================================================================== */
+      const state = {
+        chats: JSON.parse(JSON.stringify(INITIAL_CHATS)),
+        nextOrder: -1,
+        activeChatId: 'chat-1',
+        selectedChatIds: new Set(),
+        renamingChatId: null,
+        contextMenuChatId: null,
+        provider: 'openrouter',
+
+        modelId: 'google/gemini-4-argon',
+        modelLabel: '4 Argon',
+        modelSupportsFlex: true,
+        flexEnabled: true,
+
+        thinking: 'high',
+        modelThinkingExpanded: false, // Always resets to collapsed on model dropdown open
+
+        ttsId: 'google/gemini-3.8-flash-lite-tts',
+        sttId: 'openai/whisper-large-v3',
+
+        autoTts: false,
+        voicePanelOpen: false,
+
+        activePreset: 'Voice 1',
+        presets: {
+          'Voice 1': { voice: 'Puck', speed: 1.15, pitch: 1.00 },
+          'Voice 2': { voice: 'Zephyr', speed: 1.25, pitch: 0.96 },
+          'Voice 3': { voice: 'Charon', speed: 1.00, pitch: 0.92 },
+          'Voice 4': { voice: 'Fenrir', speed: 1.10, pitch: 0.88 }
+        },
+        voiceDraft: { voice: 'Puck', speed: 1.15, pitch: 1.00 },
+
+        openPopover: null,
+        openInfoMsgId: null,
+        ttsPlayingMsgId: null,
+
+        generatingMsgId: null,
+        thinkingTimers: [],
+        streamTimer: null,
+
+        isExpanded: false,
+
+        // Mic lock state machine: 'idle' | 'recording' | 'transcribing'
+        micState: 'idle',
+        recSeconds: 0,
+        recInterval: null,
+        transcribeTimer: null
+      };
+
+      /* =====================================================================
+         SVG ICONS
+         ===================================================================== */
+      const ICONS = {
+        copy: '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2.5"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>',
+        check: '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+        trash: '<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>',
+        speaker: '<svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>',
+        stopAudio: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"></rect></svg>',
+        moreDots: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"></circle></svg>',
+        chevron: '<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>',
+        chevronRight: '<svg viewBox="0 0 24 24"><polyline points="9 6 15 12 9 18"></polyline></svg>',
+        mddCheck: '<svg class="mdd-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+        editPencil: '<svg viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path></svg>',
+        pushpin: '<svg viewBox="0 0 24 24"><path d="M12 17v5"></path><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"></path></svg>',
+        micIdle: '<rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line>',
+        micStop: '<rect x="7" y="7" width="10" height="10" rx="2.4" fill="currentColor" stroke="none"></rect>',
+        micSpinner: '<circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="2.3" stroke-opacity="0.22" fill="none"></circle><path d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" fill="none"></path>'
+      };
+
+      /* =====================================================================
+         DOM REFERENCES
+         ===================================================================== */
+      const appShell = document.getElementById('appShell');
+      const chatFeed = document.getElementById('chatFeed');
+      const bottomDock = document.getElementById('bottomDock');
+      const scrollBottomBtn = document.getElementById('scrollBottomBtn');
+      const composerCapsule = document.getElementById('composerCapsule');
+      const composerInputWrap = document.getElementById('composerInputWrap');
+      const chatInput = document.getElementById('chatInput');
+      const clearInputBtn = document.getElementById('btn-clear-input');
+      const sendBtn = document.getElementById('sendBtn');
+      const sendIconSvg = document.getElementById('sendIconSvg');
+      const micBtn = document.getElementById('btn-mic');
+      const micIconSvg = document.getElementById('micIconSvg');
+      const micStatusBar = document.getElementById('micStatusBar');
+      const recDot = document.getElementById('recDot');
+      const micStatusTimer = document.getElementById('micStatusTimer');
+      const micStatusHint = document.getElementById('micStatusHint');
+
+      const modelBtnLabel = document.getElementById('modelBtnLabel');
+      const thinkingBtnLabel = document.getElementById('thinkingBtnLabel');
+      const ttsBtnLabel = document.getElementById('ttsBtnLabel');
+      const sttBtnLabel = document.getElementById('sttBtnLabel');
+
+      const popoverBackdrop = document.getElementById('popoverBackdrop');
+      const popoverMenu = document.getElementById('popoverMenu');
+
+      const ctxBackdrop = document.getElementById('ctxBackdrop');
+      const ctxMenu = document.getElementById('ctxMenu');
+
+      const drawer = document.getElementById('drawer');
+      const drawerBackdrop = document.getElementById('drawerBackdrop');
+      const chatListEl = document.getElementById('chatList');
+      const selCountBadge = document.getElementById('selCountBadge');
+      const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+
+      const voicePanel = document.getElementById('voicePanel');
+      const voiceDockBtn = document.getElementById('voiceDockBtn');
+      const voiceDockLabel = document.getElementById('voiceDockLabel');
+      const voiceSelectLabel = document.getElementById('voiceSelectLabel');
+      const savePresetBtn = document.getElementById('savePresetBtn');
+      const speedSlider = document.getElementById('speedSlider');
+      const pitchSlider = document.getElementById('pitchSlider');
+      const speedVal = document.getElementById('speedVal');
+      const pitchVal = document.getElementById('pitchVal');
+
+      const toastEl = document.getElementById('toast');
+      let toastTimer = null;
+
+      /* Offscreen canvas for exact single-line width measurement */
+      const measureCanvas = document.createElement('canvas');
+      const measureCtx = measureCanvas.getContext('2d');
+
+      /* =====================================================================
+         GLOBAL iOS LONG-PRESS SELECTION & CALLOUT LOCK
+         ===================================================================== */
+      function clearWindowSelection() {
+        try {
+          const sel = window.getSelection ? window.getSelection() : null;
+          if (sel && sel.rangeCount > 0) {
+            sel.removeAllRanges();
+          }
+        } catch (_) {}
+      }
+
+      function isEditableTarget(el) {
+        if (!el) return false;
+        const node = el.nodeType === 1 ? el : el.parentElement;
+        if (!node) return false;
+        return node.tagName === 'INPUT' || node.tagName === 'TEXTAREA' || Boolean(node.isContentEditable);
+      }
+
+      document.addEventListener('selectstart', (e) => {
+        if (isEditableTarget(e.target)) return;
+        const el = e.target && e.target.nodeType === 1 ? e.target : (e.target ? e.target.parentElement : null);
+        if (document.body.classList.contains('drawer-open') || !el || !el.closest('.msg-body')) {
+          e.preventDefault();
+          clearWindowSelection();
+        }
+      }, true);
+
+      document.addEventListener('contextmenu', (e) => {
+        if (isEditableTarget(e.target)) return;
+        const el = e.target && e.target.nodeType === 1 ? e.target : (e.target ? e.target.parentElement : null);
+        if (
+          document.body.classList.contains('drawer-open') ||
+          !el ||
+          el.closest('.drawer, .drawer-backdrop, .chat-item, .top-header, .bottom-dock, .popover-menu, .popover-backdrop, .ctx-menu, .ctx-backdrop')
+        ) {
+          e.preventDefault();
+        }
+      }, true);
+
+      document.addEventListener('selectionchange', () => {
+        const active = document.activeElement;
+        const activeEditable = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+        if (document.body.classList.contains('drawer-open') && !activeEditable) {
+          clearWindowSelection();
+        }
+      });
+
+      drawerBackdrop.addEventListener('touchstart', () => {
+        clearWindowSelection();
+      }, { passive: true });
+
+      /* =====================================================================
+         UTILITIES
+         ===================================================================== */
+      function showToast(msg) {
+        toastEl.textContent = msg;
+        toastEl.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          toastEl.classList.remove('show');
+        }, 2000);
+      }
+
+      // Format: "HH:MM  •  дд/мм/гг" (24h)
+      function formatCompactTimestamp(date) {
+        const hh = String(date.getHours()).padStart(2, '0');
+        const mm = String(date.getMinutes()).padStart(2, '0');
+        const dd = String(date.getDate()).padStart(2, '0');
+        const mo = String(date.getMonth() + 1).padStart(2, '0');
+        const yy = String(date.getFullYear()).slice(-2);
+        return `${hh}:${mm}  \u2022  ${dd}/${mo}/${yy}`;
+      }
+
+      function formatMMSS(sec) {
+        const m = Math.floor(sec / 60);
+        const s = String(sec % 60).padStart(2, '0');
+        return `${m}:${s}`;
+      }
+
+      function getActiveChat() {
+        return state.chats.find(c => c.id === state.activeChatId) || state.chats[0] || null;
+      }
+
+      // Reliable iFrame & iOS Safari copy using document.execCommand('copy')
+      function copyToClipboard(text) {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.top = '-9999px';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        } catch (_) {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).catch(() => {});
+          }
+        }
+      }
+
+      function escapeHtml(str) {
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      function pluralChats(n) {
+        const mod10 = n % 10;
+        const mod100 = n % 100;
+        if (mod10 === 1 && mod100 !== 11) return `${n} чат`;
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} чата`;
+        return `${n} чатов`;
+      }
+
+      function sortChatsPinnedFirst() {
+        state.chats.sort((a, b) => {
+          if (Boolean(a.pinned) !== Boolean(b.pinned)) {
+            return a.pinned ? -1 : 1;
+          }
+          return a.order - b.order;
+        });
+      }
+
+      /* =====================================================================
+         COMPLETE APP UI LOCK MANAGER FOR MIC RECORDING & TRANSCRIPTION
+         ===================================================================== */
+      function applyAppMicLock(mode) {
+        state.micState = mode;
+        const isRecording = mode === 'recording';
+        const isTranscribing = mode === 'transcribing';
+        const isLocked = isRecording || isTranscribing;
+
+        document.body.classList.toggle('mic-recording', isRecording);
+        document.body.classList.toggle('mic-transcribing', isTranscribing);
+
+        const allControls = appShell.querySelectorAll('button, input, textarea');
+        allControls.forEach(el => {
+          if (el === micBtn) {
+            const disableMic = isTranscribing;
+            el.disabled = disableMic;
+            if (disableMic) {
+              el.setAttribute('aria-disabled', 'true');
+            } else {
+              el.removeAttribute('aria-disabled');
+            }
+            return;
+          }
+          el.disabled = isLocked;
+          if (isLocked) {
+            el.setAttribute('aria-disabled', 'true');
+          } else {
+            el.removeAttribute('aria-disabled');
+          }
+        });
+
+        micBtn.classList.toggle('recording', isRecording);
+        micBtn.classList.toggle('transcribing', isTranscribing);
+
+        if (isRecording) {
+          micIconSvg.classList.remove('mic-spinner-svg');
+          micIconSvg.innerHTML = ICONS.micStop;
+          micBtn.setAttribute('aria-label', 'Остановить запись');
+          chatInput.style.display = 'none';
+          micStatusBar.classList.add('active');
+          recDot.classList.remove('hidden');
+          micStatusTimer.style.display = 'inline';
+          micStatusHint.textContent = 'Запись…';
+        } else if (isTranscribing) {
+          micIconSvg.classList.add('mic-spinner-svg');
+          micIconSvg.innerHTML = ICONS.micSpinner;
+          micBtn.setAttribute('aria-label', 'Транскрибация…');
+          chatInput.style.display = 'none';
+          micStatusBar.classList.add('active');
+          recDot.classList.add('hidden');
+          micStatusTimer.style.display = 'none';
+          micStatusHint.textContent = 'Транскрибация…';
+        } else {
+          micIconSvg.classList.remove('mic-spinner-svg');
+          micIconSvg.innerHTML = ICONS.micIdle;
+          micBtn.setAttribute('aria-label', 'Микрофон');
+          micStatusBar.classList.remove('active');
+          chatInput.style.display = 'block';
+        }
+
+        updateComposerLayout();
+        syncSendButton();
+      }
+
+      /* =====================================================================
+         iOS VISUAL VIEWPORT KEYBOARD ANCHORING
+         ===================================================================== */
+      if (window.visualViewport) {
+        const syncViewport = () => {
+          const vv = window.visualViewport;
+          appShell.style.height = `${vv.height}px`;
+          appShell.style.top = `${vv.offsetTop}px`;
+          const kbOffset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+          bottomDock.style.bottom = `${kbOffset}px`;
+          window.scrollTo(0, 0);
+          updateScrollBottomBtn();
+        };
+        window.visualViewport.addEventListener('resize', syncViewport);
+        window.visualViewport.addEventListener('scroll', syncViewport);
+      }
+
+      /* =====================================================================
+         SCROLL-TO-BOTTOM FLOATING BUTTON VISIBILITY
+         ===================================================================== */
+      function updateScrollBottomBtn() {
+        const distFromBottom = chatFeed.scrollHeight - chatFeed.scrollTop - chatFeed.clientHeight;
+        const shouldShow = distFromBottom > 70 && !state.voicePanelOpen && state.micState === 'idle';
+        scrollBottomBtn.classList.toggle('visible', shouldShow);
+      }
+
+      chatFeed.addEventListener('scroll', updateScrollBottomBtn, { passive: true });
+      scrollBottomBtn.addEventListener('click', () => {
+        if (state.micState !== 'idle') return;
+        chatFeed.scrollTo({ top: chatFeed.scrollHeight, behavior: 'smooth' });
+      });
+
+      /* =====================================================================
+         COMPOSER AUTO-EXPAND / AUTO-COLLAPSE + CLEAR (×) BUTTON
+         ===================================================================== */
+      function getAvailSingleWidth() {
+        const capW = composerCapsule.clientWidth;
+        if (!capW) return 112;
+        // capsule.clientWidth - padding (22) - 3x50 buttons (150) - 3x8 gaps (24) - clear × space (28)
+        return Math.max(44, capW - 22 - 150 - 24 - 28);
+      }
+
+      function measureTextSingleLine(text) {
+        if (!measureCtx || !text) return 0;
+        const cs = window.getComputedStyle(chatInput);
+        const weight = cs.fontWeight || '400';
+        const size = cs.fontSize || '18px';
+        const family = cs.fontFamily || '"Google Sans", "Inter", -apple-system, BlinkMacSystemFont, sans-serif';
+        measureCtx.font = `${weight} ${size} ${family}`;
+        return measureCtx.measureText(text).width + 6;
+      }
+
+      function updateComposerLayout() {
+        const isMicActive = state.micState !== 'idle';
+        const hasAnyText = !isMicActive && chatInput.value.length > 0;
+        composerInputWrap.classList.toggle('has-text', hasAnyText);
+
+        if (!hasAnyText) {
+          composerCapsule.classList.remove('is-expanded');
+          state.isExpanded = false;
+          chatInput.style.height = '';
+          return;
+        }
+
+        const val = chatInput.value;
+        const hasNewline = val.includes('\n');
+        const availSingleWidth = getAvailSingleWidth();
+        const measuredWidth = hasNewline ? Infinity : measureTextSingleLine(val);
+
+        // -18px collapse hysteresis prevents jitter when deleting near the width edge
+        const threshold = state.isExpanded ? (availSingleWidth - 18) : (availSingleWidth - 4);
+
+        if (!hasNewline && measuredWidth <= threshold) {
+          composerCapsule.classList.remove('is-expanded');
+          state.isExpanded = false;
+          chatInput.style.height = '';
+          return;
+        }
+
+        composerCapsule.classList.add('is-expanded');
+        state.isExpanded = true;
+        chatInput.style.height = 'auto';
+        const targetHeight = Math.min(chatInput.scrollHeight, 156);
+        chatInput.style.height = `${Math.max(25, targetHeight)}px`;
+      }
+
+      // Preserve iOS keyboard focus when tapping Clear (×)
+      clearInputBtn.addEventListener('pointerdown', (e) => {
+        if (state.micState !== 'idle') return;
+        e.preventDefault();
+      });
+
+      clearInputBtn.addEventListener('click', () => {
+        if (state.micState !== 'idle') return;
+        chatInput.value = '';
+        updateComposerLayout();
+        syncSendButton();
+        chatInput.focus();
+      });
+
+      window.addEventListener('resize', () => {
+        updateComposerLayout();
+        updateScrollBottomBtn();
+      });
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => updateComposerLayout());
+      }
+
+      /* =====================================================================
+         TOP HEADER SYNC
+         ===================================================================== */
+      function syncHeaderUI() {
+        modelBtnLabel.textContent = state.modelLabel;
+
+        const thinkObj = THINKING_LEVELS.find(t => t.id === state.thinking) || THINKING_LEVELS[0];
+        thinkingBtnLabel.textContent = thinkObj.label;
+
+        const ttsObj = TTS_MODELS.find(t => t.id === state.ttsId) || TTS_MODELS[0];
+        ttsBtnLabel.textContent = ttsObj.name;
+
+        const sttObj = STT_MODELS.find(s => s.id === state.sttId) || STT_MODELS[0];
+        sttBtnLabel.textContent = sttObj.name;
+      }
+
+      /* =====================================================================
+         POPOVERS — MODEL (WITH CLEAN COLLAPSED THINKING & FLAT FLEX), TTS, STT,
+         UPWARD BALANCE STATS, UPWARD VOICE SELECTOR, AND ••• MESSAGE INFO
+         ===================================================================== */
+      function closePopover() {
+        state.openPopover = null;
+        state.openInfoMsgId = null;
+        popoverMenu.classList.remove('open', 'drop-up', 'gemini-model-menu', 'selector-menu', 'info-popover');
+        popoverBackdrop.classList.remove('visible');
+        document.querySelectorAll('.gemini-model-trigger.open, .meta-trigger.open, .balance-pill.open, .vp-voice-select.open, .msg-icon-btn.info-open').forEach(el => {
+          el.classList.remove('open', 'info-open');
+        });
+      }
+
+      function positionPopover(anchorEl, opts = {}) {
+        const {
+          align = 'left',
+          dropUp = false,
+          autoFlip = false,
+          matchWidth = false,
+          fixedWidth = null
+        } = opts;
+
+        const shellRect = appShell.getBoundingClientRect();
+        const rect = anchorEl.getBoundingClientRect();
+
+        popoverMenu.style.top = 'auto';
+        popoverMenu.style.bottom = 'auto';
+        popoverMenu.style.left = 'auto';
+        popoverMenu.style.right = 'auto';
+        popoverMenu.style.width = fixedWidth ? `${fixedWidth}px` : (matchWidth ? `${Math.max(rect.width, 210)}px` : 'auto');
+
+        const measuredH = popoverMenu.offsetHeight || 160;
+        const measuredW = fixedWidth || popoverMenu.offsetWidth || 244;
+
+        let shouldDropUp = dropUp;
+        if (autoFlip) {
+          const spaceBelow = shellRect.bottom - rect.bottom - 12;
+          const spaceAbove = rect.top - shellRect.top - 12;
+          if (spaceBelow < measuredH + 10 && spaceAbove > spaceBelow) {
+            shouldDropUp = true;
+          }
+        }
+
+        if (shouldDropUp) {
+          popoverMenu.classList.add('drop-up');
+          const bottomOffset = shellRect.bottom - rect.top + 8;
+          popoverMenu.style.bottom = `${bottomOffset}px`;
+        } else {
+          popoverMenu.classList.remove('drop-up');
+          popoverMenu.style.top = `${rect.bottom - shellRect.top + 8}px`;
+        }
+
+        if (align === 'center') {
+          const leftOffset = Math.max(10, Math.round((shellRect.width - measuredW) / 2));
+          popoverMenu.style.left = `${leftOffset}px`;
+        } else if (align === 'right') {
+          const rightOffset = Math.max(10, shellRect.right - rect.right);
+          popoverMenu.style.right = `${rightOffset}px`;
+        } else {
+          let leftOffset = rect.left - shellRect.left;
+          const maxLeft = shellRect.width - measuredW - 10;
+          leftOffset = Math.max(10, Math.min(leftOffset, Math.max(10, maxLeft)));
+          popoverMenu.style.left = `${leftOffset}px`;
+        }
+      }
+
+      /* Center Model Dropdown (268px): 5 Models + Darker Collapsible Thinking + Flat Flex */
+      function renderModelDropdownContent() {
+        const thinkObj = THINKING_LEVELS.find(t => t.id === state.thinking) || THINKING_LEVELS[0];
+
+        const flexAvailable = state.modelSupportsFlex;
+        const flexOn = flexAvailable && state.flexEnabled;
+        const flexClass = !flexAvailable ? 'is-disabled' : (flexOn ? 'is-on' : '');
+        const flexText = flexOn ? 'Flex : On' : 'Flex : Off';
+
+        let html = '<div class="mdd-list">';
+
+        CHAT_MODELS.forEach(m => {
+          const sel = state.modelId === m.id ? 'selected' : '';
+          html += `
+            <button class="mdd-item ${sel}" data-select-model="${escapeHtml(m.id)}">
+              <span>${escapeHtml(m.label)}</span>
+              ${ICONS.mddCheck}
+            </button>`;
+        });
+
+        html += '<div class="mdd-gap"></div>';
+
+        // Collapsible "Thinking level" accordion (always resets collapsed on dropdown open)
+        html += `
+          <button class="mdd-thinking-btn ${state.modelThinkingExpanded ? 'expanded' : ''}" id="mddThinkingToggle" aria-expanded="${state.modelThinkingExpanded}">
+            <span class="mdd-thinking-chev">${ICONS.chevronRight}</span>
+            <span>Thinking level</span>
+            <span class="mdd-thinking-current">${escapeHtml(thinkObj.label)}</span>
+          </button>
+          <div class="mdd-thinking-panel ${state.modelThinkingExpanded ? 'expanded' : ''}" id="mddThinkingPanel">
+            <div class="mdd-thinking-inner">
+              <div class="mdd-thinking-list">`;
+
+        THINKING_LEVELS.forEach(t => {
+          const sel = state.thinking === t.id ? 'selected' : '';
+          html += `
+                <button class="mdd-think-opt ${sel}" data-select-think="${t.id}">
+                  <span>${t.label}</span>
+                  ${ICONS.mddCheck}
+                </button>`;
+        });
+
+        html += `
+              </div>
+            </div>
+          </div>`;
+
+        // Flat Flex row directly on main #1e1f24 dropdown background
+        html += `
+          <button class="mdd-flex-item ${flexClass}" id="mddFlexToggle" role="switch" aria-checked="${flexOn}" ${!flexAvailable ? 'aria-disabled="true"' : ''}>
+            <span>${flexText}</span>
+            ${flexOn ? ICONS.mddCheck : ''}
+          </button>`;
+
+        html += '</div>';
+        popoverMenu.innerHTML = html;
+
+        popoverMenu.querySelectorAll('[data-select-model]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const found = CHAT_MODELS.find(m => m.id === btn.dataset.selectModel);
+            if (!found) return;
+            state.modelId = found.id;
+            state.modelLabel = found.label;
+            state.modelSupportsFlex = found.flexSupported;
+            if (!found.flexSupported) {
+              state.flexEnabled = false;
+            }
+            syncHeaderUI();
+            closePopover();
+          });
+        });
+
+        const thinkBtn = document.getElementById('mddThinkingToggle');
+        const thinkPanel = document.getElementById('mddThinkingPanel');
+        thinkBtn.addEventListener('click', () => {
+          state.modelThinkingExpanded = !state.modelThinkingExpanded;
+          thinkBtn.classList.toggle('expanded', state.modelThinkingExpanded);
+          thinkBtn.setAttribute('aria-expanded', String(state.modelThinkingExpanded));
+          thinkPanel.classList.toggle('expanded', state.modelThinkingExpanded);
+        });
+
+        popoverMenu.querySelectorAll('[data-select-think]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            state.thinking = btn.dataset.selectThink;
+            syncHeaderUI();
+            renderModelDropdownContent();
+          });
+        });
+
+        const flexBtn = document.getElementById('mddFlexToggle');
+        flexBtn.addEventListener('click', () => {
+          if (!state.modelSupportsFlex) return;
+          state.flexEnabled = !state.flexEnabled;
+          renderModelDropdownContent();
+        });
+      }
+
+      function openPopover(type, anchorEl, payload = null) {
+        if (state.micState !== 'idle') return;
+
+        if (type === 'info' && state.openPopover === 'info' && state.openInfoMsgId === payload.id) {
+          closePopover();
+          return;
+        }
+        if (type !== 'info' && state.openPopover === type) {
+          closePopover();
+          return;
+        }
+
+        closePopover();
+        if (type === 'stats' && state.voicePanelOpen) {
+          toggleVoicePanel(false);
+        }
+        state.openPopover = type;
+
+        if (type === 'model') {
+          state.modelThinkingExpanded = false; // Reset to collapsed on every open
+          anchorEl.classList.add('open');
+          popoverMenu.classList.add('gemini-model-menu');
+          renderModelDropdownContent();
+          positionPopover(anchorEl, { align: 'center', fixedWidth: 268 });
+        }
+
+        if (type === 'tts') {
+          anchorEl.classList.add('open');
+          popoverMenu.classList.add('selector-menu');
+          let html = '<div class="mdd-list">';
+          TTS_MODELS.forEach(t => {
+            const sel = state.ttsId === t.id ? 'selected' : '';
+            html += `
+              <button class="mdd-item ${sel}" data-select-tts="${escapeHtml(t.id)}">
+                <span>${escapeHtml(t.name)}</span>
+                ${ICONS.mddCheck}
+              </button>`;
+          });
+          html += '</div>';
+          popoverMenu.innerHTML = html;
+          positionPopover(anchorEl, { align: 'left', fixedWidth: 256 });
+
+          popoverMenu.querySelectorAll('[data-select-tts]').forEach(btn => {
+            btn.addEventListener('click', () => {
+              state.ttsId = btn.dataset.selectTts;
+              syncHeaderUI();
+              closePopover();
+            });
+          });
+        }
+
+        if (type === 'stt') {
+          anchorEl.classList.add('open');
+          popoverMenu.classList.add('selector-menu');
+          let html = '<div class="mdd-list">';
+          STT_MODELS.forEach(s => {
+            const sel = state.sttId === s.id ? 'selected' : '';
+            html += `
+              <button class="mdd-item ${sel}" data-select-stt="${escapeHtml(s.id)}">
+                <span>${escapeHtml(s.name)}</span>
+                ${ICONS.mddCheck}
+              </button>`;
+          });
+          html += '</div>';
+          popoverMenu.innerHTML = html;
+          positionPopover(anchorEl, { align: 'right', fixedWidth: 244 });
+
+          popoverMenu.querySelectorAll('[data-select-stt]').forEach(btn => {
+            btn.addEventListener('click', () => {
+              state.sttId = btn.dataset.selectStt;
+              syncHeaderUI();
+              closePopover();
+            });
+          });
+        }
+
+        /* Balance Breakdown Popover opening UPWARD above the Tier-2 bar */
+        if (type === 'stats') {
+          anchorEl.classList.add('open');
+          const ttsName = (TTS_MODELS.find(t => t.id === state.ttsId) || TTS_MODELS[0]).name;
+          const sttName = (STT_MODELS.find(s => s.id === state.sttId) || STT_MODELS[0]).name;
+          popoverMenu.innerHTML = `
+            <div class="stats-card">
+              <div class="stats-top-row">
+                <div>
+                  <div class="stats-balance-lbl">Остаток OpenRouter</div>
+                  <div class="stats-balance-val">$0.000</div>
+                </div>
+                <div style="text-align:right;">
+                  <div class="stats-balance-lbl">За день</div>
+                  <div style="font-size:15px;font-weight:500;color:var(--text-header);">$0.000</div>
+                </div>
+              </div>
+
+              <div class="stats-limit-wrap">
+                <div class="stats-limit-head">
+                  <span>Дневной софт-лимит</span>
+                  <span>$0.000 / $1.000</span>
+                </div>
+                <div class="stats-progress-track">
+                  <div class="stats-progress-fill" style="width:0%;"></div>
+                </div>
+              </div>
+
+              <div class="stats-quota-box">
+                <span style="color:var(--text-level);">Free квота (:free)</span>
+                <span style="color:var(--text-header);font-weight:500;">0 / 50</span>
+              </div>
+
+              <div class="stats-table">
+                <div class="stats-row">
+                  <div style="min-width:0;">
+                    <div class="stats-row-name">Chat · ${escapeHtml(state.modelLabel)}</div>
+                    <div class="stats-row-sub">0 tok</div>
+                  </div>
+                  <div class="stats-row-val">$0.000</div>
+                </div>
+                <div class="stats-row">
+                  <div style="min-width:0;">
+                    <div class="stats-row-name">TTS · ${escapeHtml(ttsName)}</div>
+                    <div class="stats-row-sub">0 симв</div>
+                  </div>
+                  <div class="stats-row-val">$0.000</div>
+                </div>
+                <div class="stats-row">
+                  <div style="min-width:0;">
+                    <div class="stats-row-name">STT · ${escapeHtml(sttName)}</div>
+                    <div class="stats-row-sub">0 сек</div>
+                  </div>
+                  <div class="stats-row-val">$0.000</div>
+                </div>
+              </div>
+            </div>`;
+          positionPopover(anchorEl, { align: 'left', dropUp: true });
+        }
+
+        if (type === 'voice') {
+          anchorEl.classList.add('open');
+          const currentVoice = state.voiceDraft.voice;
+          let html = '<div class="mdd-list">';
+          GEMINI_VOICES.forEach(v => {
+            const sel = currentVoice === v ? 'selected' : '';
+            html += `
+              <button class="mdd-item ${sel}" data-select-voice="${v}">
+                <span>${v}</span>
+                ${ICONS.mddCheck}
+              </button>`;
+          });
+          html += '</div>';
+          popoverMenu.innerHTML = html;
+          positionPopover(anchorEl, { align: 'left', dropUp: true, matchWidth: true });
+
+          popoverMenu.querySelectorAll('[data-select-voice]').forEach(btn => {
+            btn.addEventListener('click', () => {
+              state.voiceDraft.voice = btn.dataset.selectVoice;
+              syncVoicePanelUI();
+              closePopover();
+            });
+          });
+        }
+
+        if (type === 'info' && payload) {
+          state.openInfoMsgId = payload.id;
+          anchorEl.classList.add('info-open', 'active');
+          popoverMenu.classList.add('info-popover');
+
+          let html = '<div class="info-pop-stack">';
+          html += `<div class="info-pop-time">${escapeHtml(payload.timestamp)}</div>`;
+          if (payload.role === 'assistant') {
+            const modelName = payload.model || state.modelLabel;
+            html += `<div class="info-pop-model">Модель: <strong>${escapeHtml(modelName)}</strong></div>`;
+          }
+          html += '</div>';
+
+          popoverMenu.innerHTML = html;
+          positionPopover(anchorEl, { align: 'right', autoFlip: true });
+        }
+
+        popoverBackdrop.classList.add('visible');
+        popoverMenu.classList.add('open');
+      }
+
+      document.querySelectorAll('[data-popover]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          if (state.micState !== 'idle') return;
+          e.stopPropagation();
+          openPopover(btn.dataset.popover, btn);
+        });
+      });
+
+      popoverBackdrop.addEventListener('click', closePopover);
+      document.addEventListener('keydown', (e) => {
+        if (state.micState !== 'idle') return;
+        if (e.key === 'Escape') {
+          if (state.contextMenuChatId) {
+            closeContextMenu();
+          } else if (state.openPopover) {
+            closePopover();
+          } else if (!state.renamingChatId) {
+            closeDrawer();
+          }
+        }
+      });
+
+      /* =====================================================================
+         CHAT FEED, LIVE-ONLY THINKING & 5-ICON MESSAGE FOOTER
+         ===================================================================== */
+      function stopActivePlayback() {
+        state.ttsPlayingMsgId = null;
+        updateTtsIcons();
+      }
+
+      function togglePlayback(msgId) {
+        if (state.micState !== 'idle') return;
+        if (state.ttsPlayingMsgId === msgId) {
+          stopActivePlayback();
+          return;
+        }
+        state.ttsPlayingMsgId = msgId;
+        updateTtsIcons();
+      }
+
+      function updateTtsIcons() {
+        document.querySelectorAll('[data-tts-btn]').forEach(btn => {
+          const isPlaying = btn.dataset.ttsBtn === state.ttsPlayingMsgId;
+          btn.innerHTML = isPlaying ? ICONS.stopAudio : ICONS.speaker;
+          btn.classList.toggle('speaking', isPlaying);
+          btn.setAttribute('aria-label', isPlaying ? 'Остановить озвучку' : 'Озвучить');
+        });
+      }
+
+      function clearGenerationTimers() {
+        state.thinkingTimers.forEach(t => clearTimeout(t));
+        state.thinkingTimers = [];
+        if (state.streamTimer) {
+          clearInterval(state.streamTimer);
+          state.streamTimer = null;
+        }
+      }
+
+      function abortGeneration(notify = true, removeIfEmpty = true) {
+        if (!state.generatingMsgId) return false;
+        clearGenerationTimers();
+        const msgId = state.generatingMsgId;
+        state.generatingMsgId = null;
+
+        const chat = getActiveChat();
+        if (chat) {
+          const idx = chat.messages.findIndex(m => m.id === msgId);
+          if (idx !== -1) {
+            const msg = chat.messages[idx];
+            const wasThinkingOnly = Boolean(msg.liveThinking) && !msg.plainText;
+            msg.liveThinking = null;
+            msg.streaming = false;
+            if (removeIfEmpty && wasThinkingOnly) {
+              chat.messages.splice(idx, 1);
+            }
+          }
+        }
+        syncSendButton();
+        renderFeed();
+        if (notify) showToast('Генерация прервана');
+        return true;
+      }
+
+      function renderFeed(scrollToBottom = false) {
+        const chat = getActiveChat();
+        chatFeed.innerHTML = '';
+
+        if (!chat || chat.messages.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'chat-empty';
+          empty.innerHTML = `
+            <div class="chat-empty-title">Новый диалог</div>
+            <div style="font-size:14px;">Напишите сообщение или запишите голос</div>
+          `;
+          chatFeed.appendChild(empty);
+          updateScrollBottomBtn();
+          return;
+        }
+
+        chat.messages.forEach(msg => {
+          const block = document.createElement('article');
+          block.className = 'msg-block';
+          block.dataset.msgId = msg.id;
+
+          if (msg.role === 'user') {
+            const card = document.createElement('div');
+            card.className = `user-card${msg.collapsed ? ' collapsed' : ''}`;
+
+            const textEl = document.createElement('div');
+            textEl.className = `msg-body${msg.collapsed ? ' clamped' : ''}`;
+            textEl.textContent = msg.text;
+            card.appendChild(textEl);
+
+            if (msg.collapsed) {
+              card.addEventListener('click', () => {
+                if (state.micState !== 'idle') return;
+                msg.collapsed = false;
+                renderFeed();
+              });
+            }
+
+            block.appendChild(card);
+          } else {
+            if (msg.liveThinking) {
+              const liveRow = document.createElement('div');
+              liveRow.className = 'live-thinking-row';
+              liveRow.innerHTML = `
+                <div class="gemini-dot-spinner" aria-hidden="true">
+                  <span></span><span></span><span></span>
+                </div>
+                <span class="live-thinking-text">${escapeHtml(msg.liveThinking)}</span>
+              `;
+              block.appendChild(liveRow);
+            } else {
+              const aiContent = document.createElement('div');
+              aiContent.className = `msg-body ai-content${msg.collapsed ? ' clamped' : ''}`;
+              if (msg.html) {
+                aiContent.innerHTML = msg.html + (msg.streaming ? '<span class="stream-cursor"></span>' : '');
+              } else {
+                aiContent.innerHTML = `<p>${escapeHtml(msg.plainText || '')}${msg.streaming ? '<span class="stream-cursor"></span>' : ''}</p>`;
+              }
+              if (msg.collapsed) {
+                aiContent.style.cursor = 'pointer';
+                aiContent.addEventListener('click', () => {
+                  if (state.micState !== 'idle') return;
+                  msg.collapsed = false;
+                  renderFeed();
+                });
+              }
+              block.appendChild(aiContent);
+            }
+          }
+
+          /* Unified 5-icon footer: Copy -> Delete -> Speak -> ••• -> Collapse */
+          const footer = document.createElement('div');
+          footer.className = 'msg-footer';
+
+          const actions = document.createElement('div');
+          actions.className = 'msg-actions';
+
+          const copyBtn = document.createElement('button');
+          copyBtn.className = 'msg-icon-btn';
+          copyBtn.setAttribute('aria-label', 'Копировать');
+          copyBtn.innerHTML = ICONS.copy;
+          copyBtn.addEventListener('click', () => {
+            if (state.micState !== 'idle') return;
+            const raw = msg.role === 'user' ? msg.text : (msg.plainText || '');
+            copyToClipboard(raw);
+            copyBtn.innerHTML = ICONS.check;
+            copyBtn.classList.add('active');
+            setTimeout(() => {
+              copyBtn.innerHTML = ICONS.copy;
+              copyBtn.classList.remove('active');
+            }, 1100);
+          });
+
+          const delBtn = document.createElement('button');
+          delBtn.className = 'msg-icon-btn';
+          delBtn.setAttribute('aria-label', 'Удалить');
+          delBtn.innerHTML = ICONS.trash;
+          delBtn.addEventListener('click', () => {
+            if (state.micState !== 'idle') return;
+            if (state.openInfoMsgId === msg.id) closePopover();
+            let aborted = false;
+            if (state.generatingMsgId === msg.id) {
+              clearGenerationTimers();
+              state.generatingMsgId = null;
+              syncSendButton();
+              aborted = true;
+            }
+            if (state.ttsPlayingMsgId === msg.id) {
+              stopActivePlayback();
+              aborted = true;
+            }
+            chat.messages = chat.messages.filter(m => m.id !== msg.id);
+            renderFeed();
+            if (aborted) {
+              showToast('Процесс прерван · сообщение удалено');
+            }
+          });
+
+          const ttsBtn = document.createElement('button');
+          ttsBtn.className = 'msg-icon-btn';
+          ttsBtn.dataset.ttsBtn = msg.id;
+          const isPlaying = state.ttsPlayingMsgId === msg.id;
+          ttsBtn.innerHTML = isPlaying ? ICONS.stopAudio : ICONS.speaker;
+          if (isPlaying) ttsBtn.classList.add('speaking');
+          ttsBtn.setAttribute('aria-label', isPlaying ? 'Остановить озвучку' : 'Озвучить');
+          ttsBtn.addEventListener('click', () => togglePlayback(msg.id));
+
+          const infoBtn = document.createElement('button');
+          infoBtn.className = 'msg-icon-btn';
+          infoBtn.setAttribute('aria-label', 'Информация о сообщении');
+          infoBtn.innerHTML = ICONS.moreDots;
+          infoBtn.addEventListener('click', (e) => {
+            if (state.micState !== 'idle') return;
+            e.stopPropagation();
+            openPopover('info', infoBtn, msg);
+          });
+
+          const foldBtn = document.createElement('button');
+          foldBtn.className = `msg-icon-btn collapse-btn${msg.collapsed ? '' : ' is-expanded'}`;
+          foldBtn.setAttribute('aria-label', msg.collapsed ? 'Развернуть' : 'Свернуть');
+          foldBtn.innerHTML = ICONS.chevron;
+          foldBtn.addEventListener('click', () => {
+            if (state.micState !== 'idle') return;
+            msg.collapsed = !msg.collapsed;
+            renderFeed();
+          });
+
+          actions.appendChild(copyBtn);
+          actions.appendChild(delBtn);
+          actions.appendChild(ttsBtn);
+          actions.appendChild(infoBtn);
+          actions.appendChild(foldBtn);
+          footer.appendChild(actions);
+
+          block.appendChild(footer);
+          chatFeed.appendChild(block);
+        });
+
+        if (state.micState !== 'idle') {
+          applyAppMicLock(state.micState);
+        }
+
+        if (scrollToBottom) {
+          chatFeed.scrollTop = chatFeed.scrollHeight;
+        }
+        requestAnimationFrame(updateScrollBottomBtn);
+      }
+
+      /* =====================================================================
+         BOTTOM DOCK: VOICE SETTINGS, TIER-2 BAR, MIC LOCK & STREAMING
+         ===================================================================== */
+      function syncVoicePanelUI() {
+        const d = state.voiceDraft;
+        speedSlider.value = d.speed.toFixed(2);
+        pitchSlider.value = d.pitch.toFixed(2);
+        speedVal.textContent = `${d.speed.toFixed(2)}x`;
+        pitchVal.textContent = `${d.pitch.toFixed(2)}x`;
+        voiceSelectLabel.textContent = d.voice;
+        // English Tier-2 label strictly without speed: "Voice: Voice 1, Puck"
+        voiceDockLabel.textContent = `Voice: ${state.activePreset}, ${d.voice}`;
+
+        document.querySelectorAll('#presetGroup .vp-preset-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.preset === state.activePreset);
+        });
+      }
+
+      function toggleVoicePanel(forceState) {
+        if (state.micState !== 'idle' && forceState !== false) return;
+        const nextOpen = typeof forceState === 'boolean' ? forceState : !state.voicePanelOpen;
+        if (nextOpen && state.openPopover) {
+          closePopover();
+        }
+        state.voicePanelOpen = nextOpen;
+        voicePanel.classList.toggle('open', state.voicePanelOpen);
+        voiceDockBtn.classList.toggle('open', state.voicePanelOpen);
+        voiceDockBtn.classList.toggle('active', state.voicePanelOpen);
+        if (!state.voicePanelOpen && state.openPopover === 'voice') {
+          closePopover();
+        }
+        updateScrollBottomBtn();
+      }
+
+      voiceDockBtn.addEventListener('click', () => {
+        if (state.micState !== 'idle') return;
+        toggleVoicePanel();
+      });
+
+      document.querySelectorAll('#presetGroup .vp-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (state.micState !== 'idle') return;
+          state.activePreset = btn.dataset.preset;
+          const saved = state.presets[state.activePreset];
+          state.voiceDraft = { voice: saved.voice, speed: saved.speed, pitch: saved.pitch };
+          syncVoicePanelUI();
+        });
+      });
+
+      speedSlider.addEventListener('input', () => {
+        state.voiceDraft.speed = parseFloat(speedSlider.value);
+        syncVoicePanelUI();
+      });
+
+      pitchSlider.addEventListener('input', () => {
+        state.voiceDraft.pitch = parseFloat(pitchSlider.value);
+        syncVoicePanelUI();
+      });
+
+      let saveFlashTimer = null;
+      savePresetBtn.addEventListener('click', () => {
+        if (state.micState !== 'idle') return;
+        state.presets[state.activePreset] = {
+          voice: state.voiceDraft.voice,
+          speed: state.voiceDraft.speed,
+          pitch: state.voiceDraft.pitch
+        };
+        savePresetBtn.textContent = 'Saved';
+        savePresetBtn.classList.add('saved');
+        clearTimeout(saveFlashTimer);
+        saveFlashTimer = setTimeout(() => {
+          savePresetBtn.textContent = 'Save';
+          savePresetBtn.classList.remove('saved');
+        }, 1200);
+        showToast(`${state.activePreset}: ${state.voiceDraft.voice} · ${state.voiceDraft.speed.toFixed(2)}x`);
+      });
+
+      const autoTtsBtn = document.getElementById('autoTtsBtn');
+      autoTtsBtn.addEventListener('click', () => {
+        if (state.micState !== 'idle') return;
+        state.autoTts = !state.autoTts;
+        autoTtsBtn.classList.toggle('active', state.autoTts);
+        autoTtsBtn.setAttribute('aria-pressed', String(state.autoTts));
+      });
+
+      document.getElementById('attachBtn').addEventListener('click', () => {
+        if (state.micState !== 'idle') return;
+        showToast('Вложения: фото / файл (мок)');
+      });
+
+      function syncSendButton() {
+        if (state.generatingMsgId) {
+          sendBtn.classList.remove('ready');
+          sendBtn.classList.add('streaming');
+          sendBtn.setAttribute('aria-label', 'Остановить');
+          sendIconSvg.innerHTML = '<rect x="7" y="7" width="10" height="10" rx="2.2" fill="currentColor" stroke="none"></rect>';
+          return;
+        }
+        sendBtn.classList.remove('streaming');
+        const hasText = state.micState === 'idle' && chatInput.value.trim().length > 0;
+        sendBtn.classList.toggle('ready', hasText);
+        sendBtn.setAttribute('aria-label', 'Отправить');
+        sendIconSvg.innerHTML = '<line x1="12" y1="19" x2="12" y2="5"></line><polyline points="6 11 12 5 18 11"></polyline>';
+      }
+
+      ['input', 'keyup', 'change'].forEach(evt => {
+        chatInput.addEventListener(evt, () => {
+          if (state.micState !== 'idle') return;
+          updateComposerLayout();
+          syncSendButton();
+        });
+      });
+
+      chatInput.addEventListener('paste', () => {
+        if (state.micState !== 'idle') return;
+        requestAnimationFrame(() => {
+          updateComposerLayout();
+          syncSendButton();
+        });
+      });
+
+      chatInput.addEventListener('keydown', (e) => {
+        if (state.micState !== 'idle') {
+          e.preventDefault();
+          return;
+        }
+        if (e.key === 'Enter' && !e.shiftKey && window.innerWidth >= 520) {
+          e.preventDefault();
+          handleSendOrStop();
+        }
+      });
+
+      /* ---------------------------------------------------------------------
+         MIC RECORDING -> TRANSCRIPTION FULL-APP LOCK FLOW
+         --------------------------------------------------------------------- */
+      function startMicRecording() {
+        // Close every open overlay/drawer/voice panel & blur keyboard before locking
+        closePopover();
+        closeContextMenu();
+        toggleVoicePanel(false);
+        closeDrawer();
+        stopActivePlayback();
+        if (document.activeElement && document.activeElement.blur) {
+          document.activeElement.blur();
+        }
+
+        state.recSeconds = 0;
+        micStatusTimer.textContent = '0:00';
+        applyAppMicLock('recording');
+
+        clearInterval(state.recInterval);
+        state.recInterval = setInterval(() => {
+          state.recSeconds += 1;
+          micStatusTimer.textContent = formatMMSS(state.recSeconds);
+        }, 1000);
+      }
+
+      function stopMicAndTranscribe() {
+        clearInterval(state.recInterval);
+        state.recInterval = null;
+
+        // Enter ~1.6s transcribing phase where ALL buttons INCLUDING #btn-mic are locked
+        applyAppMicLock('transcribing');
+
+        clearTimeout(state.transcribeTimer);
+        state.transcribeTimer = setTimeout(() => {
+          state.transcribeTimer = null;
+
+          const sampleDictation = 'Проверь, как держится аудиосессия после остановки записи и оставь пресет Voice 1 с голосом Puck.';
+          const existing = chatInput.value.trim();
+          chatInput.value = existing ? `${existing} ${sampleDictation}` : sampleDictation;
+
+          applyAppMicLock('idle');
+          updateComposerLayout();
+          syncSendButton();
+          updateScrollBottomBtn();
+        }, 1600);
+      }
+
+      micBtn.addEventListener('click', () => {
+        if (state.micState === 'transcribing') return;
+        if (state.micState === 'recording') {
+          stopMicAndTranscribe();
+        } else {
+          startMicRecording();
+        }
+      });
+
+      function handleSendOrStop() {
+        if (state.micState !== 'idle') return;
+        if (state.generatingMsgId) {
+          abortGeneration(true, true);
+          return;
+        }
+        const text = chatInput.value.trim();
+        if (!text) return;
+
+        let chat = getActiveChat();
+        if (!chat) {
+          chat = createNewChatObject();
+          state.chats.unshift(chat);
+          sortChatsPinnedFirst();
+          state.activeChatId = chat.id;
+        }
+
+        const now = new Date();
+        if (chat.messages.length === 0) {
+          chat.title = text.slice(0, 32) + (text.length > 32 ? '…' : '');
+        }
+        chat.date = `Сегодня · ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+        chat.messages.push({
+          id: 'u-' + Date.now(),
+          role: 'user',
+          timestamp: formatCompactTimestamp(now),
+          collapsed: false,
+          text
+        });
+
+        chatInput.value = '';
+        updateComposerLayout();
+
+        const capturedModel = state.modelLabel;
+        const flexStateText = state.modelSupportsFlex && state.flexEnabled ? 'Flex : On' : 'Flex : Off';
+        const thinkLabel = (THINKING_LEVELS.find(t => t.id === state.thinking) || THINKING_LEVELS[0]).label;
+        const replyText = `Ответ сгенерирован моделью ${capturedModel} (${flexStateText}, Thinking: ${thinkLabel}). Нажмите «•••» справа под сообщением, чтобы увидеть время и модель генерации.`;
+        const words = replyText.split(' ');
+        let wordIdx = 0;
+
+        const aiId = 'a-' + (Date.now() + 1);
+        const aiMsg = {
+          id: aiId,
+          role: 'assistant',
+          model: capturedModel,
+          timestamp: formatCompactTimestamp(new Date()),
+          collapsed: false,
+          liveThinking: THINKING_STEPS[0],
+          streaming: false,
+          plainText: ''
+        };
+
+        chat.messages.push(aiMsg);
+        state.generatingMsgId = aiId;
+        syncSendButton();
+        renderFeed(true);
+
+        const beginStreaming = () => {
+          if (state.generatingMsgId !== aiId) return;
+          aiMsg.liveThinking = null;
+          aiMsg.streaming = true;
+          renderFeed(true);
+
+          const stepMs = Math.max(55, Math.floor(1650 / Math.ceil(words.length / 2)));
+          state.streamTimer = setInterval(() => {
+            if (state.generatingMsgId !== aiId) {
+              clearGenerationTimers();
+              return;
+            }
+            wordIdx += 2;
+            aiMsg.plainText = words.slice(0, wordIdx).join(' ');
+            if (wordIdx >= words.length) {
+              clearGenerationTimers();
+              aiMsg.streaming = false;
+              state.generatingMsgId = null;
+              syncSendButton();
+              renderFeed(true);
+              if (state.autoTts && state.micState === 'idle') {
+                togglePlayback(aiId);
+              }
+            } else {
+              renderFeed(true);
+            }
+          }, stepMs);
+        };
+
+        const t1 = setTimeout(() => {
+          if (state.generatingMsgId !== aiId) return;
+          aiMsg.liveThinking = THINKING_STEPS[1];
+          renderFeed(true);
+        }, 500);
+
+        const t2 = setTimeout(() => {
+          if (state.generatingMsgId !== aiId) return;
+          aiMsg.liveThinking = THINKING_STEPS[2];
+          renderFeed(true);
+        }, 1000);
+
+        const t3 = setTimeout(() => {
+          beginStreaming();
+        }, 1500);
+
+        state.thinkingTimers.push(t1, t2, t3);
+      }
+
+      sendBtn.addEventListener('click', handleSendOrStop);
+
+      /* =====================================================================
+         LEFT SIDE DRAWER: SWIPE-SELECT + LONG-PRESS RENAME & PIN
+         ===================================================================== */
+      function createNewChatObject() {
+        return {
+          id: 'chat-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+          title: 'Новый чат',
+          date: 'Только что',
+          pinned: false,
+          order: state.nextOrder--,
+          messages: []
+        };
+      }
+
+      document.getElementById('btn-new-chat').addEventListener('click', () => {
+        if (state.micState !== 'idle') return;
+        closePopover();
+        closeContextMenu();
+        stopActivePlayback();
+        abortGeneration(false, true);
+        const existingEmpty = state.chats.find(c => c.messages.length === 0);
+        if (existingEmpty) {
+          state.activeChatId = existingEmpty.id;
+        } else {
+          const fresh = createNewChatObject();
+          state.chats.unshift(fresh);
+          sortChatsPinnedFirst();
+          state.activeChatId = fresh.id;
+        }
+        renderFeed();
+        showToast('Открыт новый чат');
+      });
+
+      function openDrawer() {
+        if (state.micState !== 'idle') return;
+        closePopover();
+        closeContextMenu();
+        if (document.activeElement && document.activeElement.blur) {
+          document.activeElement.blur();
+        }
+        clearWindowSelection();
+        document.body.classList.add('drawer-open');
+        drawer.classList.add('open');
+        drawerBackdrop.classList.add('open');
+        drawer.setAttribute('aria-hidden', 'false');
+        renderChatList();
+      }
+
+      function closeDrawer() {
+        endDragSelect();
+        closeContextMenu();
+        state.renamingChatId = null;
+        document.body.classList.remove('drawer-open');
+        drawer.classList.remove('open');
+        drawerBackdrop.classList.remove('open');
+        drawer.setAttribute('aria-hidden', 'true');
+      }
+
+      document.getElementById('btn-menu').addEventListener('click', openDrawer);
+      document.getElementById('closeDrawerBtn').addEventListener('click', closeDrawer);
+      drawerBackdrop.addEventListener('click', closeDrawer);
+
+      document.querySelectorAll('#providerSwitch .seg-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (state.micState !== 'idle') return;
+          document.querySelectorAll('#providerSwitch .seg-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          state.provider = btn.dataset.provider;
+          showToast(state.provider === 'openrouter' ? 'Провайдер: OpenRouter' : 'Провайдер: Direct / Custom');
+        });
+      });
+
+      const apiAccordionBtn = document.getElementById('apiAccordionBtn');
+      const apiAccordionCollapse = document.getElementById('apiAccordionCollapse');
+      apiAccordionBtn.addEventListener('click', () => {
+        if (state.micState !== 'idle') return;
+        const isOpen = apiAccordionBtn.classList.toggle('open');
+        apiAccordionCollapse.classList.toggle('open', isOpen);
+        apiAccordionBtn.setAttribute('aria-expanded', String(isOpen));
+      });
+
+      document.querySelectorAll('[data-toggle-pw]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (state.micState !== 'idle') return;
+          const inp = document.getElementById(btn.dataset.togglePw);
+          if (inp) inp.type = inp.type === 'password' ? 'text' : 'password';
+        });
+      });
+
+      function syncBulkToolbarUI() {
+        const count = state.selectedChatIds.size;
+        selCountBadge.textContent = String(count);
+        selCountBadge.classList.toggle('visible', count > 0);
+        bulkDeleteBtn.classList.toggle('has-selection', count > 0);
+      }
+
+      function applyChatSelection(chatId, shouldSelect) {
+        if (!chatId) return;
+        const already = state.selectedChatIds.has(chatId);
+        if (already === shouldSelect) return;
+
+        if (shouldSelect) {
+          state.selectedChatIds.add(chatId);
+        } else {
+          state.selectedChatIds.delete(chatId);
+        }
+
+        const rowEl = chatListEl.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
+        if (rowEl) {
+          rowEl.classList.toggle('selected', shouldSelect);
+          const checkCol = rowEl.querySelector('.chat-check-col');
+          if (checkCol) checkCol.setAttribute('aria-checked', String(shouldSelect));
+        }
+        syncBulkToolbarUI();
+      }
+
+      // Instant 1-tap bulk delete (zero confirmation dialog)
+      bulkDeleteBtn.addEventListener('click', () => {
+        if (state.micState !== 'idle' || state.selectedChatIds.size === 0) return;
+
+        closeContextMenu();
+        const removedCount = state.selectedChatIds.size;
+        const activeWasDeleted = state.selectedChatIds.has(state.activeChatId);
+
+        state.chats = state.chats.filter(c => !state.selectedChatIds.has(c.id));
+        state.selectedChatIds.clear();
+
+        if (activeWasDeleted) {
+          stopActivePlayback();
+          abortGeneration(false, true);
+          if (state.chats.length === 0) {
+            const fresh = createNewChatObject();
+            state.chats.push(fresh);
+            state.activeChatId = fresh.id;
+          } else {
+            state.activeChatId = state.chats[0].id;
+          }
+          renderFeed();
+        }
+
+        renderChatList();
+        showToast(`Удалено: ${pluralChats(removedCount)}`);
+      });
+
+      document.getElementById('selectAllBtn').addEventListener('click', () => {
+        if (state.micState !== 'idle') return;
+        state.chats.forEach(c => applyChatSelection(c.id, true));
+      });
+
+      document.getElementById('deselectAllBtn').addEventListener('click', () => {
+        if (state.micState !== 'idle') return;
+        Array.from(state.selectedChatIds).forEach(id => applyChatSelection(id, false));
+      });
+
+      /* ---------------------------------------------------------------------
+         LONG-PRESS CONTEXT MENU (ПЕРЕИМЕНОВАТЬ + PIN)
+         --------------------------------------------------------------------- */
+      function closeContextMenu() {
+        state.contextMenuChatId = null;
+        ctxMenu.classList.remove('open', 'drop-up');
+        ctxBackdrop.classList.remove('visible');
+        chatListEl.querySelectorAll('.chat-item.context-highlight').forEach(el => {
+          el.classList.remove('context-highlight');
+        });
+      }
+
+      function renderContextMenuContent(chat) {
+        const isPinned = Boolean(chat.pinned);
+        ctxMenu.innerHTML = `
+          <button class="ctx-item" id="ctxRenameBtn" role="menuitem">
+            <span class="ctx-item-left">
+              ${ICONS.editPencil}
+              <span>Переименовать</span>
+            </span>
+          </button>
+          <button class="ctx-item ${isPinned ? 'is-pinned' : ''}" id="ctxPinBtn" role="menuitemcheckbox" aria-checked="${isPinned}">
+            <span class="ctx-item-left">
+              ${ICONS.pushpin}
+              <span>Pin</span>
+            </span>
+            <span class="ctx-pin-box">${ICONS.check}</span>
+          </button>
+        `;
+
+        document.getElementById('ctxRenameBtn').addEventListener('click', () => {
+          const targetId = chat.id;
+          closeContextMenu();
+          startInlineRename(targetId);
+        });
+
+        document.getElementById('ctxPinBtn').addEventListener('click', () => {
+          chat.pinned = !chat.pinned;
+          sortChatsPinnedFirst();
+          renderContextMenuContent(chat);
+          renderChatList();
+          const rowEl = chatListEl.querySelector(`.chat-item[data-chat-id="${chat.id}"]`);
+          if (rowEl) rowEl.classList.add('context-highlight');
+        });
+      }
+
+      function openContextMenu(chatId, rowEl) {
+        const chat = state.chats.find(c => c.id === chatId);
+        if (!chat || !rowEl) return;
+
+        clearWindowSelection();
+        closeContextMenu();
+        state.contextMenuChatId = chatId;
+        rowEl.classList.add('context-highlight');
+        renderContextMenuContent(chat);
+
+        const shellRect = appShell.getBoundingClientRect();
+        const rowRect = rowEl.getBoundingClientRect();
+        const menuW = 198;
+        const menuH = 104;
+
+        ctxMenu.style.top = 'auto';
+        ctxMenu.style.bottom = 'auto';
+        ctxMenu.style.left = 'auto';
+        ctxMenu.style.right = 'auto';
+
+        const spaceBelow = shellRect.bottom - rowRect.bottom - 14;
+        const spaceAbove = rowRect.top - shellRect.top - 14;
+        if (spaceBelow < menuH && spaceAbove > spaceBelow) {
+          ctxMenu.classList.add('drop-up');
+          ctxMenu.style.bottom = `${shellRect.bottom - rowRect.top + 6}px`;
+        } else {
+          ctxMenu.classList.remove('drop-up');
+          ctxMenu.style.top = `${rowRect.bottom - shellRect.top + 6}px`;
+        }
+
+        const desiredLeft = Math.min(rowRect.left - shellRect.left + 16, shellRect.width - menuW - 12);
+        ctxMenu.style.left = `${Math.max(12, desiredLeft)}px`;
+
+        ctxBackdrop.classList.add('visible');
+        ctxMenu.classList.add('open');
+
+        if (navigator.vibrate) {
+          try { navigator.vibrate(12); } catch (_) {}
+        }
+      }
+
+      ctxBackdrop.addEventListener('click', closeContextMenu);
+
+      function startInlineRename(chatId) {
+        state.renamingChatId = chatId;
+        renderChatList();
+        requestAnimationFrame(() => {
+          const inp = chatListEl.querySelector('.chat-rename-input');
+          if (inp) {
+            inp.focus();
+            inp.select();
+          }
+        });
+      }
+
+      /* ---------------------------------------------------------------------
+         iOS SWIPE-SELECT ENGINE (36px .chat-check-col, elementFromPoint)
+         --------------------------------------------------------------------- */
+      const dragSelect = {
+        active: false,
+        mode: true,
+        lastChatId: null,
+        usedTouch: false
+      };
+
+      function startDragSelect(chatId) {
+        clearWindowSelection();
+        dragSelect.active = true;
+        dragSelect.mode = !state.selectedChatIds.has(chatId);
+        dragSelect.lastChatId = chatId;
+        applyChatSelection(chatId, dragSelect.mode);
+      }
+
+      function moveDragSelect(clientX, clientY) {
+        if (!dragSelect.active) return;
+        const el = document.elementFromPoint(clientX, clientY);
+        if (!el) return;
+        const col = el.closest('.chat-check-col');
+        if (!col) return;
+        const chatId = col.dataset.chatId;
+        if (chatId && chatId !== dragSelect.lastChatId) {
+          dragSelect.lastChatId = chatId;
+          applyChatSelection(chatId, dragSelect.mode);
+        }
+      }
+
+      function endDragSelect() {
+        dragSelect.active = false;
+        dragSelect.lastChatId = null;
+      }
+
+      window.addEventListener('pointermove', (e) => {
+        if (!dragSelect.active || dragSelect.usedTouch) return;
+        moveDragSelect(e.clientX, e.clientY);
+      });
+
+      window.addEventListener('pointerup', () => {
+        if (dragSelect.active && !dragSelect.usedTouch) endDragSelect();
+      });
+
+      window.addEventListener('pointercancel', () => {
+        if (dragSelect.active) endDragSelect();
+      });
+
+      chatListEl.addEventListener('touchmove', (e) => {
+        if (!dragSelect.active) return;
+        e.preventDefault();
+        const t = e.touches[0];
+        if (t) moveDragSelect(t.clientX, t.clientY);
+      }, { passive: false });
+
+      window.addEventListener('touchend', () => {
+        if (dragSelect.active) {
+          endDragSelect();
+          setTimeout(() => { dragSelect.usedTouch = false; }, 350);
+        }
+      }, { passive: true });
+
+      window.addEventListener('touchcancel', () => {
+        if (dragSelect.active) {
+          endDragSelect();
+          dragSelect.usedTouch = false;
+        }
+      }, { passive: true });
+
+      // Swipe left on drawer to close
+      let drawerSwipeStartX = 0;
+      let drawerSwipeStartY = 0;
+      let drawerSwipeBlocked = false;
+
+      drawer.addEventListener('touchstart', (e) => {
+        drawerSwipeBlocked = Boolean(e.target.closest('.chat-check-col')) || Boolean(state.contextMenuChatId) || Boolean(state.renamingChatId);
+        drawerSwipeStartX = e.touches[0].clientX;
+        drawerSwipeStartY = e.touches[0].clientY;
+      }, { passive: true });
+
+      drawer.addEventListener('touchend', (e) => {
+        if (drawerSwipeBlocked || dragSelect.active) return;
+        const dx = drawerSwipeStartX - e.changedTouches[0].clientX;
+        const dy = Math.abs(drawerSwipeStartY - e.changedTouches[0].clientY);
+        if (dx > 64 && dx > dy * 1.5) {
+          closeDrawer();
+        }
+      }, { passive: true });
+
+      function renderChatList() {
+        chatListEl.innerHTML = '';
+
+        if (state.chats.length === 0) {
+          chatListEl.innerHTML = '<div class="chat-list-empty">История чатов пуста</div>';
+          syncBulkToolbarUI();
+          return;
+        }
+
+        state.chats.forEach(chat => {
+          const isActive = chat.id === state.activeChatId;
+          const isSelected = state.selectedChatIds.has(chat.id);
+          const isRenaming = state.renamingChatId === chat.id;
+
+          const row = document.createElement('div');
+          row.className = `chat-item${isActive ? ' active' : ''}${isSelected ? ' selected' : ''}`;
+          row.dataset.chatId = chat.id;
+
+          const mainArea = document.createElement('div');
+          mainArea.className = 'chat-item-main';
+
+          if (isRenaming) {
+            const oldTitle = chat.title;
+            let settled = false;
+
+            const renameInput = document.createElement('input');
+            renameInput.type = 'text';
+            renameInput.className = 'chat-rename-input';
+            renameInput.value = oldTitle;
+            renameInput.setAttribute('aria-label', 'Новое название чата');
+
+            const commitRename = (save) => {
+              if (settled) return;
+              settled = true;
+              if (save) {
+                const trimmed = renameInput.value.trim();
+                chat.title = trimmed.length > 0 ? trimmed : oldTitle;
+              } else {
+                chat.title = oldTitle;
+              }
+              state.renamingChatId = null;
+              renderChatList();
+            };
+
+            renameInput.addEventListener('keydown', (e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitRename(true);
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                commitRename(false);
+              }
+            });
+
+            renameInput.addEventListener('blur', () => commitRename(true));
+            renameInput.addEventListener('click', (e) => e.stopPropagation());
+
+            mainArea.appendChild(renameInput);
+
+            const metaEl = document.createElement('div');
+            metaEl.className = 'chat-item-meta';
+            metaEl.textContent = `${chat.date} · ${chat.messages.length} сообщ.`;
+            mainArea.appendChild(metaEl);
+          } else {
+            mainArea.innerHTML = `
+              <div class="chat-item-title">${escapeHtml(chat.title)}</div>
+              <div class="chat-item-meta">${escapeHtml(chat.date)} · ${chat.messages.length} сообщ.</div>
+            `;
+
+            // 450ms long-press (cancelled on >10px movement) + iOS selection suppression
+            let lpTimer = null;
+            let lpStartX = 0;
+            let lpStartY = 0;
+            let lpTriggered = false;
+
+            const cancelLongPress = () => {
+              if (lpTimer) {
+                clearTimeout(lpTimer);
+                lpTimer = null;
+              }
+            };
+
+            const armLongPress = (x, y) => {
+              clearWindowSelection();
+              cancelLongPress();
+              lpTriggered = false;
+              lpStartX = x;
+              lpStartY = y;
+              lpTimer = setTimeout(() => {
+                lpTimer = null;
+                lpTriggered = true;
+                clearWindowSelection();
+                openContextMenu(chat.id, row);
+              }, 450);
+            };
+
+            mainArea.addEventListener('touchstart', (e) => {
+              clearWindowSelection();
+              const t = e.touches[0];
+              if (t) armLongPress(t.clientX, t.clientY);
+            }, { passive: true });
+
+            mainArea.addEventListener('touchmove', (e) => {
+              if (!lpTimer) return;
+              const t = e.touches[0];
+              if (!t) return;
+              if (Math.hypot(t.clientX - lpStartX, t.clientY - lpStartY) > 10) {
+                cancelLongPress();
+              }
+            }, { passive: true });
+
+            mainArea.addEventListener('touchend', () => {
+              cancelLongPress();
+              if (lpTriggered) clearWindowSelection();
+            }, { passive: true });
+
+            mainArea.addEventListener('touchcancel', cancelLongPress, { passive: true });
+
+            mainArea.addEventListener('pointerdown', (e) => {
+              clearWindowSelection();
+              if (e.pointerType === 'touch' || e.button !== 0) return;
+              armLongPress(e.clientX, e.clientY);
+            });
+
+            mainArea.addEventListener('pointermove', (e) => {
+              if (!lpTimer || e.pointerType === 'touch') return;
+              if (Math.hypot(e.clientX - lpStartX, e.clientY - lpStartY) > 10) {
+                cancelLongPress();
+              }
+            });
+
+            mainArea.addEventListener('pointerup', cancelLongPress);
+            mainArea.addEventListener('pointerleave', cancelLongPress);
+
+            mainArea.addEventListener('contextmenu', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              cancelLongPress();
+              clearWindowSelection();
+              openContextMenu(chat.id, row);
+            });
+
+            mainArea.addEventListener('click', () => {
+              if (lpTriggered) {
+                lpTriggered = false;
+                return;
+              }
+              if (state.contextMenuChatId || state.micState !== 'idle') return;
+              stopActivePlayback();
+              abortGeneration(false, true);
+              state.activeChatId = chat.id;
+              renderFeed();
+              closeDrawer();
+            });
+          }
+
+          row.appendChild(mainArea);
+
+          // Tiny 11.5px pushpin SVG immediately to the left of select checkbox
+          if (chat.pinned) {
+            const pinEl = document.createElement('div');
+            pinEl.className = 'chat-pin-indicator';
+            pinEl.setAttribute('aria-label', 'Закреплённый чат');
+            pinEl.innerHTML = ICONS.pushpin;
+            row.appendChild(pinEl);
+          }
+
+          const checkCol = document.createElement('div');
+          checkCol.className = 'chat-check-col';
+          checkCol.dataset.chatId = chat.id;
+          checkCol.setAttribute('role', 'checkbox');
+          checkCol.setAttribute('aria-checked', String(isSelected));
+          checkCol.setAttribute('aria-label', `Выбрать чат ${chat.title}`);
+          checkCol.innerHTML = `
+            <div class="ios-checkbox">
+              <svg viewBox="0 0 24 24"><polyline points="5 13 10 18 19 7"></polyline></svg>
+            </div>
+          `;
+
+          checkCol.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dragSelect.usedTouch = true;
+            startDragSelect(chat.id);
+          }, { passive: false });
+
+          checkCol.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'touch' || dragSelect.usedTouch) return;
+            e.preventDefault();
+            e.stopPropagation();
+            startDragSelect(chat.id);
+          });
+
+          row.appendChild(checkCol);
+          chatListEl.appendChild(row);
+        });
+
+        syncBulkToolbarUI();
+      }
+
+      /* =====================================================================
+         INITIALIZATION
+         ===================================================================== */
+      syncHeaderUI();
+      syncVoicePanelUI();
+      syncSendButton();
+      updateComposerLayout();
+      renderFeed();
+      renderChatList();
+    })();
+  </script>
+</body>
+</html>
