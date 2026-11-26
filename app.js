@@ -2,7 +2,7 @@
   'use strict';
 
   /* =========================================================================
-     CONSTANTS & CATALOGS (STEP 1: INDEXEDDB + DYNAMIC GEMINI MODELS)
+     CONSTANTS & CATALOGS (STEP 2: OPENROUTER CHAT SSE + MARKDOWN + FLEX)
      ========================================================================= */
   const DB_NAME = 'OpenRouterPWA_DB';
   const DB_VERSION = 1;
@@ -73,12 +73,6 @@
     'Puck', 'Zephyr', 'Aoede', 'Charon',
     'Fenrir', 'Kore', 'Leda', 'Orus',
     'Perseus', 'Callirrhoe', 'Autonoe', 'Enceladus'
-  ];
-
-  const THINKING_STEPS = [
-    'Анализ контекста запроса…',
-    'Проверка параметров модели…',
-    'Формирование ответа…'
   ];
 
   const INITIAL_CHATS = [
@@ -593,14 +587,16 @@
     personaDraft: { name: '', instructions: '' },
 
     usageLog: [],
+    rateLimitInfo: null,
 
     openPopover: null,
     openInfoMsgId: null,
     ttsPlayingMsgId: null,
 
     generatingMsgId: null,
-    thinkingTimers: [],
-    streamTimer: null,
+    generatingChatId: null,
+    abortController: null,
+    streamRafId: null,
 
     isExpanded: false,
 
@@ -670,6 +666,7 @@
         model: m.model || undefined,
         timestamp: m.timestamp,
         collapsed: Boolean(m.collapsed),
+        isError: m.isError ? true : undefined,
         text: m.text !== undefined ? m.text : undefined,
         html: m.html !== undefined ? m.html : undefined,
         plainText: m.plainText !== undefined ? m.plainText : undefined
@@ -685,6 +682,34 @@
   function persistAllChats() {
     state.chats.forEach((c) => persistChat(c));
   }
+  function pruneUsageLog24h() {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    state.usageLog = (state.usageLog || []).filter((e) => e && typeof e.ts === 'number' && e.ts >= cutoff);
+  }
+
+  function recordUsageEntry(entry) {
+    if (!entry) return;
+    pruneUsageLog24h();
+    state.usageLog.push(Object.assign({ ts: Date.now() }, entry));
+    idbPut('kv', { key: 'usageLog', value: state.usageLog });
+  }
+
+  function captureRateLimitHeaders(headers) {
+    if (!headers || !headers.get) return;
+    const limit = headers.get('x-ratelimit-limit');
+    const remaining = headers.get('x-ratelimit-remaining');
+    const reset = headers.get('x-ratelimit-reset');
+    if (limit || remaining || reset) {
+      state.rateLimitInfo = {
+        limit: limit !== null ? Number(limit) : null,
+        remaining: remaining !== null ? Number(remaining) : null,
+        reset: reset !== null ? Number(reset) : null,
+        updatedAt: Date.now()
+      };
+      idbPut('kv', { key: 'rateLimitInfo', value: state.rateLimitInfo });
+    }
+  }
+
 
   /* =========================================================================
      OPENROUTER GEMINI MODELS DISCOVERY & CAPABILITIES
@@ -1860,30 +1885,223 @@
     });
   }
 
-  function clearGenerationTimers() {
-    state.thinkingTimers.forEach((t) => clearTimeout(t));
-    state.thinkingTimers = [];
-    if (state.streamTimer) {
-      clearInterval(state.streamTimer);
-      state.streamTimer = null;
+  /* =========================================================================
+     MARKDOWN RENDERER & CODE BLOCK COPY DELEGATION
+     ========================================================================= */
+  function formatInlineMarkdown(raw) {
+    const codeTokens = [];
+    let s = escapeHtml(raw);
+
+    // Protect inline code spans first
+    s = s.replace(/`([^`\n]+)`/g, (_, inner) => {
+      const idx = codeTokens.length;
+      codeTokens.push(`<code>${inner}</code>`);
+      return `@@INLINECODE_${idx}@@`;
+    });
+
+    // Safe http/https links: [label](url)
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:var(--menu-active-text);text-decoration:underline;">${label}</a>`;
+    });
+
+    // Bold **...** and __...__
+    s = s.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[\s(>])__([^_]+?)__(?=[\s)<.,!?:;]|$)/g, '$1<strong>$2</strong>');
+
+    // Italic *...*
+    s = s.replace(/(^|[\s(>])\*([^*\n]+?)\*(?=[\s)<.,!?:;]|$)/g, '$1<em>$2</em>');
+
+    // Strikethrough ~~...~~
+    s = s.replace(/~~([^~]+?)~~/g, '<del>$1</del>');
+
+    // Restore inline code
+    s = s.replace(/@@INLINECODE_(\d+)@@/g, (_, idx) => codeTokens[Number(idx)] || '');
+    return s;
+  }
+
+  function renderTextSegmentToHtml(segment) {
+    const lines = segment.replace(/\r\n/g, '\n').split('\n');
+    const out = [];
+    let paraLines = [];
+    let listItems = [];
+
+    const flushPara = () => {
+      if (paraLines.length === 0) return;
+      out.push(`<p>${paraLines.map((l) => formatInlineMarkdown(l)).join('<br>')}</p>`);
+      paraLines = [];
+    };
+
+    const flushList = () => {
+      if (listItems.length === 0) return;
+      out.push(`<ul>${listItems.map((it) => `<li>${formatInlineMarkdown(it)}</li>`).join('')}</ul>`);
+      listItems = [];
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (!trimmed) {
+        flushPara();
+        flushList();
+        continue;
+      }
+
+      // Headings (# .. ######)
+      const hMatch = trimmed.match(/^#{1,6}\s+(.+)$/);
+      if (hMatch) {
+        flushPara();
+        flushList();
+        out.push(`<p><strong>${formatInlineMarkdown(hMatch[1])}</strong></p>`);
+        continue;
+      }
+
+      // Unordered or ordered list items
+      const ulMatch = trimmed.match(/^(?:[-*•]|\d+\.)\s+(.+)$/);
+      if (ulMatch) {
+        flushPara();
+        listItems.push(ulMatch[1]);
+        continue;
+      }
+
+      // Blockquote
+      const bqMatch = trimmed.match(/^>\s?(.*)$/);
+      if (bqMatch) {
+        flushPara();
+        flushList();
+        out.push(`<p style="padding-left:10px;opacity:0.86;">${formatInlineMarkdown(bqMatch[1])}</p>`);
+        continue;
+      }
+
+      // Horizontal rule
+      if (/^([-*_]){3,}$/.test(trimmed)) {
+        flushPara();
+        flushList();
+        continue;
+      }
+
+      flushList();
+      paraLines.push(line);
+    }
+
+    flushPara();
+    flushList();
+    return out.join('');
+  }
+
+  function buildCodeBlockHtml(lang, codeText) {
+    const cleanLang = (lang || 'code').trim().slice(0, 24) || 'code';
+    const trimmedCode = codeText.replace(/^\n/, '').replace(/\n$/, '');
+    return (
+      `<div class="code-block-wrap">` +
+        `<div class="code-block-head">` +
+          `<span>${escapeHtml(cleanLang)}</span>` +
+          `<button class="code-copy-btn" type="button" data-code-copy>Копировать</button>` +
+        `</div>` +
+        `<pre><code>${escapeHtml(trimmedCode)}</code></pre>` +
+      `</div>`
+    );
+  }
+
+  function renderMarkdownToHtml(md, isStreaming = false) {
+    if (!md) {
+      return isStreaming ? '<p><span class="stream-cursor"></span></p>' : '';
+    }
+
+    const src = String(md).replace(/\r\n/g, '\n');
+    const parts = [];
+    const fenceRe = /```([^\n`]*)\n([\s\S]*?)```/g;
+    let lastIdx = 0;
+    let match;
+
+    while ((match = fenceRe.exec(src)) !== null) {
+      if (match.index > lastIdx) {
+        const before = src.slice(lastIdx, match.index);
+        if (before.trim()) parts.push(renderTextSegmentToHtml(before));
+      }
+      parts.push(buildCodeBlockHtml(match[1], match[2]));
+      lastIdx = fenceRe.lastIndex;
+    }
+
+    const tail = src.slice(lastIdx);
+    if (tail) {
+      // Handle an unclosed fenced code block while streaming
+      const openFence = tail.match(/^([\s\S]*?)```([^\n`]*)\n([\s\S]*)$/);
+      if (openFence) {
+        if (openFence[1].trim()) {
+          parts.push(renderTextSegmentToHtml(openFence[1]));
+        }
+        parts.push(buildCodeBlockHtml(openFence[2], openFence[3]));
+      } else if (tail.trim()) {
+        parts.push(renderTextSegmentToHtml(tail));
+      }
+    }
+
+    let html = parts.join('');
+    if (!html) {
+      html = `<p>${escapeHtml(src)}</p>`;
+    }
+
+    if (isStreaming) {
+      const cursor = '<span class="stream-cursor"></span>';
+      if (html.endsWith('</p>')) {
+        html = html.slice(0, -4) + cursor + '</p>';
+      } else if (html.endsWith('</li></ul>')) {
+        html = html.slice(0, -10) + cursor + '</li></ul>';
+      } else {
+        html += cursor;
+      }
+    }
+
+    return html;
+  }
+
+  // Event delegation for Copy buttons inside rendered markdown code blocks
+  chatFeed.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest('[data-code-copy]') : null;
+    if (!btn || state.micState !== 'idle') return;
+    e.stopPropagation();
+    const wrap = btn.closest('.code-block-wrap');
+    const codeEl = wrap ? wrap.querySelector('pre code') : null;
+    if (!codeEl) return;
+    copyToClipboard(codeEl.textContent || '');
+    btn.textContent = 'Скопировано';
+    setTimeout(() => {
+      if (btn.isConnected) btn.textContent = 'Копировать';
+    }, 1100);
+  });
+
+  function cancelActiveStreamHandle() {
+    if (state.streamRafId) {
+      cancelAnimationFrame(state.streamRafId);
+      state.streamRafId = null;
+    }
+    if (state.abortController) {
+      const ctrl = state.abortController;
+      state.abortController = null;
+      try { ctrl.abort(); } catch (_) {}
     }
   }
 
   function abortGeneration(notify = true, removeIfEmpty = true) {
     if (!state.generatingMsgId) return false;
-    clearGenerationTimers();
     const msgId = state.generatingMsgId;
+    const targetChatId = state.generatingChatId || state.activeChatId;
     state.generatingMsgId = null;
+    state.generatingChatId = null;
+    cancelActiveStreamHandle();
 
-    const chat = getActiveChat();
+    const chat = state.chats.find((c) => c.id === targetChatId) || getActiveChat();
     if (chat) {
       const idx = chat.messages.findIndex((m) => m.id === msgId);
       if (idx !== -1) {
         const msg = chat.messages[idx];
-        const wasThinkingOnly = Boolean(msg.liveThinking) && !msg.plainText;
+        const hasContent = Boolean(msg.plainText && msg.plainText.trim().length > 0);
         msg.liveThinking = null;
         msg.streaming = false;
-        if (removeIfEmpty && wasThinkingOnly) {
+        if (hasContent) {
+          msg.html = renderMarkdownToHtml(msg.plainText, false);
+        } else if (removeIfEmpty) {
           chat.messages.splice(idx, 1);
         }
         persistChat(chat);
@@ -1893,6 +2111,64 @@
     renderFeed();
     if (notify) showToast('Генерация прервана');
     return true;
+  }
+
+  function patchStreamingMessageDOM(msg) {
+    if (!msg) return;
+    const block = chatFeed.querySelector(`.msg-block[data-msg-id="${msg.id}"]`);
+    if (!block) return;
+
+    const isNearBottom = (chatFeed.scrollHeight - chatFeed.scrollTop - chatFeed.clientHeight) < 110;
+    const footer = block.querySelector('.msg-footer');
+
+    if (msg.liveThinking) {
+      let liveRow = block.querySelector('.live-thinking-row');
+      if (!liveRow) {
+        const oldAi = block.querySelector('.ai-content');
+        if (oldAi) oldAi.remove();
+        liveRow = document.createElement('div');
+        liveRow.className = 'live-thinking-row';
+        liveRow.innerHTML = `
+          <div class="gemini-dot-spinner" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <span class="live-thinking-text"></span>
+        `;
+        block.insertBefore(liveRow, footer || null);
+      }
+      const txtEl = liveRow.querySelector('.live-thinking-text');
+      if (txtEl) txtEl.textContent = msg.liveThinking;
+    } else {
+      const liveRow = block.querySelector('.live-thinking-row');
+      if (liveRow) liveRow.remove();
+
+      let aiContent = block.querySelector('.ai-content');
+      if (!aiContent) {
+        aiContent = document.createElement('div');
+        aiContent.className = `msg-body ai-content${msg.collapsed ? ' clamped' : ''}`;
+        block.insertBefore(aiContent, footer || null);
+      }
+      if (msg.isError && msg.html) {
+        aiContent.innerHTML = msg.html;
+      } else {
+        aiContent.innerHTML = renderMarkdownToHtml(msg.plainText || '', Boolean(msg.streaming));
+      }
+    }
+
+    if (isNearBottom) {
+      chatFeed.scrollTop = chatFeed.scrollHeight;
+    }
+    updateScrollBottomBtn();
+  }
+
+  function scheduleStreamDOMUpdate(msg) {
+    if (state.streamRafId) return;
+    state.streamRafId = requestAnimationFrame(() => {
+      state.streamRafId = null;
+      if (state.generatingMsgId === msg.id) {
+        patchStreamingMessageDOM(msg);
+      }
+    });
   }
 
   function renderFeed(scrollToBottom = false) {
@@ -1949,10 +2225,14 @@
         } else {
           const aiContent = document.createElement('div');
           aiContent.className = `msg-body ai-content${msg.collapsed ? ' clamped' : ''}`;
-          if (msg.html) {
-            aiContent.innerHTML = msg.html + (msg.streaming ? '<span class="stream-cursor"></span>' : '');
+          if (msg.isError && msg.html) {
+            aiContent.innerHTML = msg.html;
+          } else if (msg.streaming) {
+            aiContent.innerHTML = renderMarkdownToHtml(msg.plainText || '', true);
+          } else if (msg.html) {
+            aiContent.innerHTML = msg.html;
           } else {
-            aiContent.innerHTML = `<p>${escapeHtml(msg.plainText || '')}${msg.streaming ? '<span class="stream-cursor"></span>' : ''}</p>`;
+            aiContent.innerHTML = renderMarkdownToHtml(msg.plainText || '', false);
           }
           if (msg.collapsed) {
             aiContent.style.cursor = 'pointer';
@@ -1998,8 +2278,9 @@
         if (state.openInfoMsgId === msg.id) closePopover();
         let aborted = false;
         if (state.generatingMsgId === msg.id) {
-          clearGenerationTimers();
           state.generatingMsgId = null;
+          state.generatingChatId = null;
+          cancelActiveStreamHandle();
           syncSendButton();
           aborted = true;
         }
@@ -2339,12 +2620,158 @@
     }
   });
 
-  function handleSendOrStop() {
+  /* =========================================================================
+     OPENROUTER / DIRECT CHAT COMPLETIONS SSE STREAMING ENGINE
+     ========================================================================= */
+  function extractReasoningDelta(delta) {
+    if (!delta || typeof delta !== 'object') return '';
+    let out = '';
+    if (typeof delta.reasoning === 'string') out += delta.reasoning;
+    if (typeof delta.reasoning_content === 'string') out += delta.reasoning_content;
+    if (Array.isArray(delta.reasoning_details)) {
+      delta.reasoning_details.forEach((item) => {
+        if (!item) return;
+        if (typeof item.text === 'string') out += item.text;
+        else if (typeof item.summary === 'string') out += item.summary;
+      });
+    }
+    return out;
+  }
+
+  function formatLiveThinkingSnippet(reasoningBuf) {
+    if (!reasoningBuf) return 'Размышляю…';
+    const cleaned = reasoningBuf
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/[*#_`>]/g, '')
+      .trim();
+    if (!cleaned) return 'Размышляю…';
+    const lines = cleaned.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+    const last = lines[lines.length - 1] || cleaned;
+    if (last.length <= 86) return last;
+    return '…' + last.slice(-85).trim();
+  }
+
+  function buildChatApiEndpoint() {
+    if (state.provider === 'direct') {
+      const base = (state.apiKeys.customUrl || '').trim().replace(/\/+$/, '');
+      if (!base) {
+        return { error: 'Не указан Custom Endpoint URL. Откройте меню слева → «API ключи».' };
+      }
+      const url = /\/chat\/completions$/i.test(base) ? base : `${base}/chat/completions`;
+      return { url, apiKey: (state.apiKeys.openrouter || '').trim(), isOpenRouter: false };
+    }
+
+    const key = (state.apiKeys.openrouter || '').trim();
+    if (!key) {
+      return { error: 'Не задан OpenRouter Key. Откройте меню слева → «API ключи» и вставьте ключ.' };
+    }
+    return {
+      url: `${OPENROUTER_API_BASE}/chat/completions`,
+      apiKey: key,
+      isOpenRouter: true
+    };
+  }
+
+  function buildChatRequestMessages(chat, excludeMsgId) {
+    const out = [];
+    const activePersona = state.personas[state.activePersonaIndex];
+    const sysInstructions = activePersona && typeof activePersona.instructions === 'string'
+      ? activePersona.instructions.trim()
+      : '';
+
+    if (sysInstructions) {
+      out.push({ role: 'system', content: sysInstructions });
+    }
+
+    (chat.messages || []).forEach((m) => {
+      if (!m || m.id === excludeMsgId || m.isError) return;
+      if (m.role === 'user') {
+        const txt = (m.text || '').trim();
+        if (txt) out.push({ role: 'user', content: txt });
+      } else if (m.role === 'assistant') {
+        const txt = (m.plainText || '').trim();
+        if (txt) out.push({ role: 'assistant', content: txt });
+      }
+    });
+
+    return out;
+  }
+
+  function formatApiErrorForChat(status, rawDetail, usingFlex, modelLabel) {
+    const detail = String(rawDetail || '').trim();
+    const lower = detail.toLowerCase();
+
+    if (usingFlex) {
+      const looksLikeFlexRejection =
+        status === 400 ||
+        status === 404 ||
+        status === 422 ||
+        lower.includes('flex') ||
+        lower.includes('service_tier') ||
+        lower.includes('service tier') ||
+        lower.includes('tier') ||
+        lower.includes('no endpoints found') ||
+        lower.includes('no allowed providers') ||
+        lower.includes('unsupported') ||
+        lower.includes('not supported');
+
+      if (looksLikeFlexRejection) {
+        const suffix = detail ? `\n(${detail})` : '';
+        return `Режим Flex недоступен для модели ${modelLabel}. Отключите Flex в меню модели и повторите запрос.${suffix}`;
+      }
+    }
+
+    if (status === 401) {
+      return 'Неверный API ключ (401). Проверьте OpenRouter Key в меню слева.';
+    }
+    if (status === 402) {
+      return 'Недостаточно средств на балансе OpenRouter (402).';
+    }
+    if (status === 429) {
+      return `Превышен лимит запросов (429).${detail ? ' ' + detail : ''}`;
+    }
+
+    return `Ошибка API${status ? ` (${status})` : ''}: ${detail || 'не удалось получить ответ.'}`;
+  }
+
+  function setAssistantError(chat, aiMsg, errorText) {
+    aiMsg.liveThinking = null;
+    aiMsg.streaming = false;
+    aiMsg.isError = true;
+    aiMsg.plainText = errorText;
+    aiMsg.html = `<div class="msg-error-card">${escapeHtml(errorText).replace(/\n/g, '<br>')}</div>`;
+    persistChat(chat);
+  }
+
+  async function parseResponseErrorText(resp) {
+    try {
+      const raw = await resp.text();
+      if (!raw) return resp.statusText || '';
+      try {
+        const j = JSON.parse(raw);
+        if (j && j.error) {
+          const msg = j.error.message || '';
+          const metaRaw = j.error.metadata && j.error.metadata.raw ? String(j.error.metadata.raw) : '';
+          if (metaRaw && metaRaw !== msg) {
+            return msg ? `${msg} — ${metaRaw}` : metaRaw;
+          }
+          if (msg) return msg;
+        }
+        if (j && j.message) return String(j.message);
+      } catch (_) {}
+      return raw.slice(0, 320);
+    } catch (_) {
+      return resp.statusText || '';
+    }
+  }
+
+  async function handleSendOrStop() {
     if (state.micState !== 'idle') return;
     if (state.generatingMsgId) {
       abortGeneration(true, true);
       return;
     }
+
     const text = chatInput.value.trim();
     if (!text) return;
 
@@ -2379,76 +2806,271 @@
     updateComposerLayout();
 
     const curModel = getCurrentModelObj();
-    const capturedModel = curModel ? curModel.label : state.modelLabel;
-    const flexStateText = curModel && curModel.supportsFlex && state.flexEnabled ? 'Flex : On' : 'Flex : Off';
-    const thinkObj = getAvailableThinkingLevels(curModel).find((t) => t.id === state.thinking);
-    const thinkLabel = thinkObj ? thinkObj.label : 'None';
-    const activePersonaName = (state.personas[state.activePersonaIndex] && state.personas[state.activePersonaIndex].name.trim()) || 'AI Persona';
-    const replyText = `[Шаг 1 — мок чата до Шага 2] Выбрана модель ${capturedModel} (${curModel ? curModel.id : ''}), ${flexStateText}, Thinking: ${thinkLabel}, Persona: ${activePersonaName}. Сообщение и настройки сохранены в IndexedDB.`;
-    const words = replyText.split(' ');
-    let wordIdx = 0;
+    const capturedModelId = curModel ? curModel.id : state.modelId;
+    const capturedModelLabel = curModel ? curModel.label : state.modelLabel;
+    const availableLevels = getAvailableThinkingLevels(curModel);
+    const usingFlex = state.provider === 'openrouter' && Boolean(curModel && curModel.supportsFlex) && Boolean(state.flexEnabled);
 
     const aiId = 'a-' + (Date.now() + 1);
     const aiMsg = {
       id: aiId,
       role: 'assistant',
-      model: capturedModel,
+      model: capturedModelLabel,
       timestamp: formatCompactTimestamp(new Date()),
       collapsed: false,
-      liveThinking: THINKING_STEPS[0],
+      liveThinking: state.thinking !== 'none' ? 'Размышляю…' : 'Подключение…',
       streaming: false,
-      plainText: ''
+      isError: false,
+      plainText: '',
+      html: ''
     };
 
     chat.messages.push(aiMsg);
+
+    const endpoint = buildChatApiEndpoint();
+    if (endpoint.error) {
+      setAssistantError(chat, aiMsg, endpoint.error);
+      syncSendButton();
+      renderFeed(true);
+      return;
+    }
+
+    const controller = new AbortController();
+    state.abortController = controller;
     state.generatingMsgId = aiId;
+    state.generatingChatId = chat.id;
     syncSendButton();
     renderFeed(true);
 
-    const beginStreaming = () => {
-      if (state.generatingMsgId !== aiId) return;
-      aiMsg.liveThinking = null;
-      aiMsg.streaming = true;
-      renderFeed(true);
-
-      const stepMs = Math.max(45, Math.floor(1400 / Math.ceil(words.length / 2)));
-      state.streamTimer = setInterval(() => {
-        if (state.generatingMsgId !== aiId) {
-          clearGenerationTimers();
-          return;
-        }
-        wordIdx += 2;
-        aiMsg.plainText = words.slice(0, wordIdx).join(' ');
-        if (wordIdx >= words.length) {
-          clearGenerationTimers();
-          aiMsg.streaming = false;
-          state.generatingMsgId = null;
-          persistChat(chat);
-          syncSendButton();
-          renderFeed(true);
-          if (state.autoTts && state.micState === 'idle') {
-            togglePlayback(aiId);
-          }
-        } else {
-          renderFeed(true);
-        }
-      }, stepMs);
+    const requestBody = {
+      model: capturedModelId,
+      messages: buildChatRequestMessages(chat, aiId),
+      stream: true,
+      stream_options: { include_usage: true }
     };
 
-    const t1 = setTimeout(() => {
-      if (state.generatingMsgId !== aiId) return;
-      aiMsg.liveThinking = THINKING_STEPS[1];
-      renderFeed(true);
-    }, 350);
+    if (curModel && curModel.supportsReasoning) {
+      if (state.thinking === 'none' && availableLevels.some((l) => l.id === 'none')) {
+        requestBody.reasoning = { enabled: false };
+      } else if (state.thinking !== 'none') {
+        requestBody.reasoning = { effort: state.thinking };
+      }
+    }
 
-    const t2 = setTimeout(() => {
-      if (state.generatingMsgId !== aiId) return;
-      aiMsg.liveThinking = THINKING_STEPS[2];
-      renderFeed(true);
-    }, 700);
+    if (usingFlex) {
+      requestBody.service_tier = 'flex';
+    }
 
-    const t3 = setTimeout(beginStreaming, 1050);
-    state.thinkingTimers.push(t1, t2, t3);
+    const headers = {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream'
+    };
+    if (endpoint.apiKey) {
+      headers.Authorization = `Bearer ${endpoint.apiKey}`;
+    }
+    if (endpoint.isOpenRouter) {
+      headers['HTTP-Referer'] = window.location.origin || 'https://localhost';
+      headers['X-Title'] = 'OpenRouter PWA';
+    }
+
+    let reasoningBuffer = '';
+    let finalUsage = null;
+    let streamError = null;
+
+    try {
+      const resp = await fetch(endpoint.url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      });
+
+      captureRateLimitHeaders(resp.headers);
+
+      if (!resp.ok) {
+        const detail = await parseResponseErrorText(resp);
+        if (state.generatingMsgId !== aiId) return;
+        setAssistantError(chat, aiMsg, formatApiErrorForChat(resp.status, detail, usingFlex, capturedModelLabel));
+        return;
+      }
+
+      const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+
+      // Fallback if provider returned non-streaming JSON response
+      if (contentType.includes('application/json') || !resp.body || !resp.body.getReader) {
+        const data = await resp.json();
+        if (state.generatingMsgId !== aiId) return;
+        if (data && data.error) {
+          const msg = data.error.message || JSON.stringify(data.error);
+          setAssistantError(chat, aiMsg, formatApiErrorForChat(data.error.code || 0, msg, usingFlex, capturedModelLabel));
+          return;
+        }
+        const choice = data && data.choices && data.choices[0];
+        const content = choice && choice.message && choice.message.content ? String(choice.message.content) : '';
+        if (data && data.usage) finalUsage = data.usage;
+        aiMsg.liveThinking = null;
+        aiMsg.streaming = false;
+        aiMsg.plainText = content;
+        aiMsg.html = renderMarkdownToHtml(content, false);
+        persistChat(chat);
+      } else {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let sseBuffer = '';
+
+        const processSseLine = (rawLine) => {
+          const line = rawLine.trim();
+          if (!line || line.startsWith(':')) return;
+          if (!line.startsWith('data:')) return;
+          const dataStr = line.slice(5).trim();
+          if (!dataStr || dataStr === '[DONE]') return;
+
+          let parsed;
+          try {
+            parsed = JSON.parse(dataStr);
+          } catch (_) {
+            return;
+          }
+
+          if (parsed && parsed.error) {
+            const errMsg = parsed.error.message || (parsed.error.metadata && parsed.error.metadata.raw) || 'Ошибка потока';
+            streamError = { code: parsed.error.code || 0, message: errMsg };
+            return;
+          }
+
+          if (parsed && parsed.usage) {
+            finalUsage = parsed.usage;
+          }
+
+          const choice = parsed && parsed.choices && parsed.choices[0];
+          if (!choice) return;
+          const delta = choice.delta || {};
+
+          const reasoningChunk = extractReasoningDelta(delta);
+          if (reasoningChunk && !aiMsg.plainText) {
+            reasoningBuffer += reasoningChunk;
+            aiMsg.liveThinking = formatLiveThinkingSnippet(reasoningBuffer);
+            scheduleStreamDOMUpdate(aiMsg);
+          }
+
+          const contentChunk = typeof delta.content === 'string' ? delta.content : '';
+          if (contentChunk) {
+            if (aiMsg.liveThinking !== null) {
+              aiMsg.liveThinking = null;
+            }
+            aiMsg.streaming = true;
+            aiMsg.plainText += contentChunk;
+            scheduleStreamDOMUpdate(aiMsg);
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (state.generatingMsgId !== aiId) {
+            try { await reader.cancel(); } catch (_) {}
+            return;
+          }
+          if (done) break;
+
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split('\n');
+          sseBuffer = lines.pop() || '';
+
+          for (let i = 0; i < lines.length; i++) {
+            processSseLine(lines[i]);
+            if (streamError) break;
+          }
+          if (streamError) {
+            try { await reader.cancel(); } catch (_) {}
+            break;
+          }
+        }
+
+        if (!streamError && sseBuffer.trim()) {
+          processSseLine(sseBuffer);
+        }
+
+        if (state.generatingMsgId !== aiId) return;
+
+        if (streamError) {
+          if (aiMsg.plainText.trim()) {
+            aiMsg.plainText += `\n\n[${formatApiErrorForChat(streamError.code, streamError.message, usingFlex, capturedModelLabel)}]`;
+            aiMsg.liveThinking = null;
+            aiMsg.streaming = false;
+            aiMsg.html = renderMarkdownToHtml(aiMsg.plainText, false);
+            persistChat(chat);
+          } else {
+            setAssistantError(chat, aiMsg, formatApiErrorForChat(streamError.code, streamError.message, usingFlex, capturedModelLabel));
+          }
+        } else {
+          aiMsg.liveThinking = null;
+          aiMsg.streaming = false;
+          if (!aiMsg.plainText.trim()) {
+            setAssistantError(chat, aiMsg, 'Модель вернула пустой ответ.');
+          } else {
+            aiMsg.html = renderMarkdownToHtml(aiMsg.plainText, false);
+            persistChat(chat);
+          }
+        }
+      }
+
+      // Log usage into 24h IndexedDB store (consumed by Step 3 balance details)
+      if (!aiMsg.isError && curModel) {
+        const promptTok = Number(finalUsage && finalUsage.prompt_tokens) || 0;
+        const compTok = Number(finalUsage && finalUsage.completion_tokens) || 0;
+        const totalTok = Number(finalUsage && finalUsage.total_tokens) || (promptTok + compTok);
+        let costUsd = 0;
+        if (finalUsage && typeof finalUsage.cost === 'number') {
+          costUsd = finalUsage.cost;
+        } else if (curModel.pricing) {
+          costUsd = promptTok * (curModel.pricing.prompt || 0) + compTok * (curModel.pricing.completion || 0);
+        }
+        recordUsageEntry({
+          type: 'chat',
+          modelId: capturedModelId,
+          modelLabel: capturedModelLabel,
+          tokens: totalTok,
+          promptTokens: promptTok,
+          completionTokens: compTok,
+          cost: costUsd,
+          isFree: Boolean(curModel.isFree)
+        });
+      }
+    } catch (err) {
+      if (state.generatingMsgId !== aiId || (err && err.name === 'AbortError')) {
+        return;
+      }
+      const errMsg = err && err.message ? err.message : 'Сбой сети';
+      if (aiMsg.plainText.trim()) {
+        aiMsg.liveThinking = null;
+        aiMsg.streaming = false;
+        aiMsg.plainText += `\n\n[Соединение прервано: ${errMsg}]`;
+        aiMsg.html = renderMarkdownToHtml(aiMsg.plainText, false);
+        persistChat(chat);
+      } else {
+        setAssistantError(chat, aiMsg, `Ошибка соединения: ${errMsg}`);
+      }
+    } finally {
+      if (state.generatingMsgId === aiId) {
+        if (state.streamRafId) {
+          cancelAnimationFrame(state.streamRafId);
+          state.streamRafId = null;
+        }
+        state.abortController = null;
+        state.generatingMsgId = null;
+        state.generatingChatId = null;
+        syncSendButton();
+
+        const isNearBottom = (chatFeed.scrollHeight - chatFeed.scrollTop - chatFeed.clientHeight) < 120;
+        if (state.activeChatId === chat.id) {
+          renderFeed(isNearBottom);
+        }
+
+        if (!aiMsg.isError && aiMsg.plainText && state.autoTts && state.micState === 'idle') {
+          togglePlayback(aiId);
+        }
+      }
+    }
   }
 
   sendBtn.addEventListener('click', handleSendOrStop);
@@ -3157,10 +3779,15 @@
       persistSettings(true);
     }
 
-    // 4. Load 24h usage log (ready for Step 3)
+    // 4. Load 24h usage log & rate limit metadata
     const usageRec = await idbGet('kv', 'usageLog');
     if (usageRec && Array.isArray(usageRec.value)) {
       state.usageLog = usageRec.value;
+      pruneUsageLog24h();
+    }
+    const rlRec = await idbGet('kv', 'rateLimitInfo');
+    if (rlRec && rlRec.value) {
+      state.rateLimitInfo = rlRec.value;
     }
 
     lastFetchedOrKey = state.apiKeys.openrouter || '';
