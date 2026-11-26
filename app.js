@@ -2,7 +2,7 @@
   'use strict';
 
   /* =========================================================================
-     CONSTANTS & CATALOGS (STEP 4.5: iOS MIC LEAK & AUDIO SESSION FIX)
+     CONSTANTS & CATALOGS (STEP 4.6: PER-PERSONA TTS TAGS + GROK/GEMINI ROUTING + STT PRICING)
      ========================================================================= */
   const DB_NAME = 'OpenRouterPWA_DB';
   const DB_VERSION = 2;
@@ -59,9 +59,9 @@
   ];
 
   const STT_MODELS = [
-    { id: 'openai/whisper-large-v3', name: 'Whisper Large v3', usdPerMin: 0.006 },
-    { id: 'x-ai/grok-stt-2.0', name: 'Grok STT 2.0', usdPerMin: 0.005 },
-    { id: 'google/gemini-3.5-transcribe', name: 'Gemini 3.5 Transcribe', usdPerMin: 0.004 }
+    { id: 'openai/whisper-large-v3', name: 'Whisper Large v3', usdPerMin: 0.0015 },
+    { id: 'x-ai/grok-stt-2.0', name: 'Grok STT 2.0', usdPerMin: 0.00168 },
+    { id: 'google/gemini-3.5-transcribe', name: 'Gemini 3.5 Transcribe', usdPerMin: 0.005 }
   ];
 
   // Morph is fixed to Off at this stage
@@ -607,12 +607,12 @@
 
     activePersonaIndex: 0,
     personas: [
-      { name: '', instructions: '' },
-      { name: '', instructions: '' },
-      { name: '', instructions: '' },
-      { name: '', instructions: '' }
+      { name: '', instructions: '', ttsTags: false },
+      { name: '', instructions: '', ttsTags: false },
+      { name: '', instructions: '', ttsTags: false },
+      { name: '', instructions: '', ttsTags: false }
     ],
-    personaDraft: { name: '', instructions: '' },
+    personaDraft: { name: '', instructions: '', ttsTags: false },
 
     usageLog: [],
     rateLimitInfo: null,
@@ -3077,8 +3077,129 @@
     };
   }
 
+  /* ---- Whitelisted Speech / TTS Tag Engine ---- */
+  const TTS_STANDALONE_TAGS = [
+    'pause', 'chuckle', 'breath', 'sigh',
+    'giggle', 'laugh', 'cry', 'tsk'
+  ];
+
+  const TTS_PAIRED_TAGS = [
+    'fast', 'build-intensity', 'emphasis', 'soft',
+    'slow', 'lower-pitch', 'decrease-intensity', 'loud',
+    'whisper', 'laugh-speak', 'higher-pitch', 'sing-song', 'singing'
+  ];
+
+  const TTS_ALL_TAGS = TTS_STANDALONE_TAGS.concat(TTS_PAIRED_TAGS);
+  const TTS_ALL_TAGS_RE = new RegExp(`\\[\\/?(?:${TTS_ALL_TAGS.join('|')})\\]`, 'gi');
+  const TTS_STANDALONE_RE = new RegExp(`\\[(${TTS_STANDALONE_TAGS.join('|')})\\]`, 'gi');
+  const TTS_PAIRED_OPEN_RE = new RegExp(`\\[(${TTS_PAIRED_TAGS.join('|')})\\]`, 'gi');
+  const TTS_PAIRED_CLOSE_RE = new RegExp(`\\[\\/(${TTS_PAIRED_TAGS.join('|')})\\]`, 'gi');
+  const TTS_ANY_TOKEN_RE = new RegExp(`(\\[\\/?(?:${TTS_ALL_TAGS.join('|')})\\]|<\\/?(?:${TTS_PAIRED_TAGS.join('|')})>)`, 'gi');
+
+  function isPersonaTtsTagsActive() {
+    return Boolean(state.personaDraft && state.personaDraft.ttsTags);
+  }
+
+  function hasWhitelistedTtsTag(text) {
+    if (!text) return false;
+    TTS_ALL_TAGS_RE.lastIndex = 0;
+    return TTS_ALL_TAGS_RE.test(String(text));
+  }
+
+  function stripWhitelistedTtsTags(text, hideIncompleteTail = false) {
+    if (!text) return '';
+    let s = String(text);
+
+    // Strip whitelisted complete [tag] and [/tag] tokens
+    s = s.replace(TTS_ALL_TAGS_RE, '');
+
+    // During SSE streaming, hide an unfinished trailing "[..." only if it matches a known tag prefix
+    if (hideIncompleteTail) {
+      const tailMatch = s.match(/(\[\/?[a-z-]*)$/i);
+      if (tailMatch) {
+        const rawTail = tailMatch[1].toLowerCase();
+        const isClosing = rawTail.startsWith('[/');
+        const body = rawTail.slice(isClosing ? 2 : 1);
+        const candidates = isClosing ? TTS_PAIRED_TAGS : TTS_ALL_TAGS;
+        if (body.length === 0 || candidates.some((t) => t.startsWith(body))) {
+          s = s.slice(0, s.length - tailMatch[1].length);
+        }
+      }
+    }
+
+    // Clean whitespace artifacts left behind by removed tags without hurting markdown structure
+    s = s.replace(/[ \t]{2,}/g, ' ');
+    s = s.replace(/[ \t]+([.,!?;:…])/g, '$1');
+    s = s.replace(/([(\[«“])[ \t]+/g, '$1');
+    s = s.replace(/^[ \t]+/gm, (m, offset, full) => {
+      // Preserve leading spaces only for indented markdown list bullets
+      const after = full.slice(offset + m.length);
+      return /^(?:[-*•]|\d+\.)\s/.test(after) ? m : '';
+    });
+    return s;
+  }
+
+  function stripTtsTagsOutsideCode(raw, hideIncompleteTail = false) {
+    if (!raw) return '';
+    const src = String(raw);
+    const segments = [];
+    const fenceRe = /```[\s\S]*?```/g;
+    let last = 0;
+    let m;
+
+    const cleanNonFenced = (part, isLast) => {
+      // Protect inline code spans `...`
+      const inlineTokens = [];
+      let protectedPart = part.replace(/`([^`\n]+)`/g, (full) => {
+        const idx = inlineTokens.length;
+        inlineTokens.push(full);
+        return `@@TTSCODE_${idx}@@`;
+      });
+      protectedPart = stripWhitelistedTtsTags(protectedPart, hideIncompleteTail && isLast);
+      return protectedPart.replace(/@@TTSCODE_(\d+)@@/g, (_, idx) => inlineTokens[Number(idx)] || '');
+    };
+
+    while ((m = fenceRe.exec(src)) !== null) {
+      if (m.index > last) {
+        segments.push(cleanNonFenced(src.slice(last, m.index), false));
+      }
+      segments.push(m[0]);
+      last = fenceRe.lastIndex;
+    }
+
+    if (last < src.length) {
+      segments.push(cleanNonFenced(src.slice(last), true));
+    }
+    return segments.join('').trim();
+  }
+
+  function convertTtsTagsForGrok(text) {
+    if (!text) return '';
+    let s = String(text);
+    // Normalize standalone sound/pause tags in [brackets]
+    s = s.replace(TTS_STANDALONE_RE, (_, tag) => `[${tag.toLowerCase()}]`);
+    // Convert paired wrapper tags [tag]...[/tag] -> <tag>...</tag>
+    s = s.replace(TTS_PAIRED_OPEN_RE, (_, tag) => `<${tag.toLowerCase()}>`);
+    s = s.replace(TTS_PAIRED_CLOSE_RE, (_, tag) => `</${tag.toLowerCase()}>`);
+    return s;
+  }
+
+  function normalizeTtsTagsForGemini(text) {
+    if (!text) return '';
+    return String(text).replace(TTS_ALL_TAGS_RE, (full) => full.toLowerCase());
+  }
+
+  function isGrokTtsModel(ttsId) {
+    const lower = String(ttsId || '').toLowerCase();
+    return lower.includes('grok') || lower.startsWith('x-ai/');
+  }
+
+  function isGeminiTtsModel(ttsId) {
+    return String(ttsId || '').toLowerCase().startsWith('google/');
+  }
+
   /* ---- Markdown Cleanup & First-Paragraph Fast-Start Chunking ---- */
-  function cleanTextForTts(raw) {
+  function cleanTextForTts(raw, ttsId = state.ttsId) {
     if (!raw) return '';
     let s = String(raw).replace(/\r\n/g, '\n');
 
@@ -3090,17 +3211,69 @@
     s = s.replace(/https?:\/\/\S+/g, ' ');
     // Unwrap inline code
     s = s.replace(/`([^`\n]+)`/g, '$1');
-    // Strip HTML tags (if any)
+    // Strip raw HTML tags BEFORE any Grok <tag> conversion
     s = s.replace(/<[^>]+>/g, ' ');
     // Strip markdown heading/quote/list prefixes
     s = s.replace(/^[ \t]*(?:#{1,6}\s+|>\s?|[-*•]\s+)/gm, '');
     // Strip bold/italic/strikethrough markers
     s = s.replace(/(\*\*|__|~~)/g, '');
     s = s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?:;]|$)/g, '$1$2');
+
+    // Apply per-persona TTS tag handling depending on target TTS engine
+    if (isPersonaTtsTagsActive()) {
+      if (isGrokTtsModel(ttsId)) {
+        s = convertTtsTagsForGrok(s);
+      } else if (isGeminiTtsModel(ttsId)) {
+        s = normalizeTtsTagsForGemini(s);
+      } else {
+        // ElevenLabs and other engines: strip speech tags so they are never read aloud
+        s = stripWhitelistedTtsTags(s, false);
+      }
+    }
+
     // Normalize spaces while keeping paragraph breaks
     s = s.replace(/[ \t]+/g, ' ');
     s = s.replace(/\n{3,}/g, '\n\n');
     return s.trim();
+  }
+
+  function inspectTagStateAtSplit(text, cutIndex) {
+    const stack = [];
+    let safeCut = cutIndex;
+    TTS_ANY_TOKEN_RE.lastIndex = 0;
+    let m;
+
+    while ((m = TTS_ANY_TOKEN_RE.exec(text)) !== null) {
+      const tok = m[0];
+      const start = m.index;
+      const end = start + tok.length;
+
+      // Never slice through the middle of a tag token itself
+      if (start < safeCut && safeCut < end) {
+        safeCut = start;
+        break;
+      }
+      if (start >= safeCut) break;
+
+      const isAngle = tok.startsWith('<');
+      const isClose = isAngle ? tok.startsWith('</') : tok.startsWith('[/');
+      const name = tok.replace(/^[\[<]\/?|[\]>]$/g, '').toLowerCase();
+
+      if (!TTS_PAIRED_TAGS.includes(name)) continue;
+
+      if (!isClose) {
+        stack.push({ name, isAngle, openStart: start });
+      } else {
+        for (let k = stack.length - 1; k >= 0; k--) {
+          if (stack[k].name === name && stack[k].isAngle === isAngle) {
+            stack.splice(k, 1);
+            break;
+          }
+        }
+      }
+    }
+
+    return { safeCut, openStack: stack };
   }
 
   function splitTextByLimit(text, maxLen) {
@@ -3124,9 +3297,34 @@
         const spaceIdx = slice.lastIndexOf(' ');
         cut = spaceIdx >= Math.floor(maxLen * 0.4) ? spaceIdx : maxLen;
       }
-      const head = rest.slice(0, cut).trim();
+
+      // Guard paired & standalone TTS tags from being broken across chunks
+      let { safeCut, openStack } = inspectTagStateAtSplit(rest, cut);
+      if (openStack.length > 0 && openStack[0].openStart >= Math.floor(maxLen * 0.25)) {
+        safeCut = openStack[0].openStart;
+        openStack = [];
+      }
+      if (safeCut <= 0) safeCut = Math.min(maxLen, rest.length);
+
+      let head = rest.slice(0, safeCut).trim();
+      let tail = rest.slice(safeCut).trim();
+
+      // If a paired tag spans across the forced cut, close at chunk end & reopen in next chunk
+      if (openStack.length > 0 && head && tail) {
+        for (let k = openStack.length - 1; k >= 0; k--) {
+          const t = openStack[k];
+          head += t.isAngle ? `</${t.name}>` : `[/${t.name}]`;
+        }
+        let reopenPrefix = '';
+        for (let k = 0; k < openStack.length; k++) {
+          const t = openStack[k];
+          reopenPrefix += t.isAngle ? `<${t.name}>` : `[${t.name}]`;
+        }
+        tail = reopenPrefix + tail;
+      }
+
       if (head) out.push(head);
-      rest = rest.slice(cut).trim();
+      rest = tail;
     }
     if (rest) out.push(rest);
     return out;
@@ -3705,7 +3903,7 @@
     if (!msg) return;
 
     const rawText = msg.role === 'user' ? (msg.text || '') : (msg.plainText || '');
-    const cleaned = cleanTextForTts(rawText);
+    const cleaned = cleanTextForTts(rawText, state.ttsId);
     const chunks = chunkTextForTts(cleaned);
 
     if (chunks.length === 0) {
@@ -3812,7 +4010,7 @@
   /* =========================================================================
      MARKDOWN RENDERER & CODE BLOCK COPY DELEGATION
      ========================================================================= */
-  function formatInlineMarkdown(raw) {
+  function formatInlineMarkdown(raw, hideIncompleteTagTail = false) {
     const codeTokens = [];
     let s = escapeHtml(raw);
 
@@ -3822,6 +4020,11 @@
       codeTokens.push(`<code>${inner}</code>`);
       return `@@INLINECODE_${idx}@@`;
     });
+
+    // Hide whitelisted TTS tags on screen when enabled in the active persona
+    if (isPersonaTtsTagsActive()) {
+      s = stripWhitelistedTtsTags(s, hideIncompleteTagTail);
+    }
 
     // Safe http/https links: [label](url)
     s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
@@ -3843,7 +4046,7 @@
     return s;
   }
 
-  function renderTextSegmentToHtml(segment) {
+  function renderTextSegmentToHtml(segment, isTrailingStream = false) {
     const lines = segment.replace(/\r\n/g, '\n').split('\n');
     const out = [];
     let paraLines = [];
@@ -3851,19 +4054,30 @@
 
     const flushPara = () => {
       if (paraLines.length === 0) return;
-      out.push(`<p>${paraLines.map((l) => formatInlineMarkdown(l)).join('<br>')}</p>`);
+      const rendered = paraLines
+        .map((item) => formatInlineMarkdown(item.text, item.isLast).trim())
+        .filter(Boolean);
+      if (rendered.length > 0) {
+        out.push(`<p>${rendered.join('<br>')}</p>`);
+      }
       paraLines = [];
     };
 
     const flushList = () => {
       if (listItems.length === 0) return;
-      out.push(`<ul>${listItems.map((it) => `<li>${formatInlineMarkdown(it)}</li>`).join('')}</ul>`);
+      const rendered = listItems
+        .map((item) => formatInlineMarkdown(item.text, item.isLast).trim())
+        .filter(Boolean);
+      if (rendered.length > 0) {
+        out.push(`<ul>${rendered.map((it) => `<li>${it}</li>`).join('')}</ul>`);
+      }
       listItems = [];
     };
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const trimmed = line.trim();
+      const isLastLine = isTrailingStream && i === lines.length - 1;
 
       if (!trimmed) {
         flushPara();
@@ -3876,7 +4090,8 @@
       if (hMatch) {
         flushPara();
         flushList();
-        out.push(`<p><strong>${formatInlineMarkdown(hMatch[1])}</strong></p>`);
+        const hHtml = formatInlineMarkdown(hMatch[1], isLastLine).trim();
+        if (hHtml) out.push(`<p><strong>${hHtml}</strong></p>`);
         continue;
       }
 
@@ -3884,7 +4099,7 @@
       const ulMatch = trimmed.match(/^(?:[-*•]|\d+\.)\s+(.+)$/);
       if (ulMatch) {
         flushPara();
-        listItems.push(ulMatch[1]);
+        listItems.push({ text: ulMatch[1], isLast: isLastLine });
         continue;
       }
 
@@ -3893,7 +4108,8 @@
       if (bqMatch) {
         flushPara();
         flushList();
-        out.push(`<p style="padding-left:10px;opacity:0.86;">${formatInlineMarkdown(bqMatch[1])}</p>`);
+        const bqHtml = formatInlineMarkdown(bqMatch[1], isLastLine).trim();
+        if (bqHtml) out.push(`<p style="padding-left:10px;opacity:0.86;">${bqHtml}</p>`);
         continue;
       }
 
@@ -3905,7 +4121,7 @@
       }
 
       flushList();
-      paraLines.push(line);
+      paraLines.push({ text: line, isLast: isLastLine });
     }
 
     flushPara();
@@ -3957,13 +4173,16 @@
         }
         parts.push(buildCodeBlockHtml(openFence[2], openFence[3]));
       } else if (tail.trim()) {
-        parts.push(renderTextSegmentToHtml(tail));
+        parts.push(renderTextSegmentToHtml(tail, isStreaming));
       }
     }
 
     let html = parts.join('');
-    if (!html) {
-      html = `<p>${escapeHtml(src)}</p>`;
+    if (!html && !isStreaming) {
+      const fallbackText = isPersonaTtsTagsActive() ? stripWhitelistedTtsTags(src, false) : src;
+      html = `<p>${escapeHtml(fallbackText)}</p>`;
+    } else if (!html && isStreaming) {
+      html = '<p></p>';
     }
 
     if (isStreaming) {
@@ -4246,6 +4465,9 @@
             aiContent.innerHTML = msg.html;
           } else if (msg.streaming) {
             aiContent.innerHTML = renderMarkdownToHtml(msg.plainText || '', true);
+          } else if (msg.plainText && hasWhitelistedTtsTag(msg.plainText)) {
+            // Re-render dynamically so toggling the "TTS теги" checkbox shows/hides tags live
+            aiContent.innerHTML = renderMarkdownToHtml(msg.plainText, false);
           } else if (msg.html) {
             aiContent.innerHTML = msg.html;
           } else {
@@ -4276,7 +4498,10 @@
       copyBtn.innerHTML = ICONS.copy;
       copyBtn.addEventListener('click', () => {
         if (state.micState !== 'idle') return;
-        const raw = msg.role === 'user' ? msg.text : (msg.plainText || '');
+        let raw = msg.role === 'user' ? msg.text : (msg.plainText || '');
+        if (msg.role === 'assistant' && isPersonaTtsTagsActive()) {
+          raw = stripTtsTagsOutsideCode(raw, false);
+        }
         copyToClipboard(raw);
         copyBtn.innerHTML = ICONS.check;
         copyBtn.classList.add('active');
@@ -4487,19 +4712,97 @@
   });
 
   /* =========================================================================
-     4C. AI PERSONA PANEL LOGIC
+     4C. AI PERSONA PANEL LOGIC (+ DYNAMIC PER-PERSONA "TTS ТЕГИ" CHECKBOX)
      ========================================================================= */
+  let personaTtsTagsToggleBtn = null;
+  let personaTtsTagsHintEl = null;
+  let personaTtsTagsBoxEl = null;
+
+  function ensurePersonaTtsTagsCheckbox() {
+    if (personaTtsTagsToggleBtn || !personaPanel) return;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'personaTtsTagsToggleBtn';
+    btn.setAttribute('role', 'checkbox');
+    btn.setAttribute('aria-checked', 'false');
+    btn.style.cssText = [
+      'width:100%',
+      'height:38px',
+      'padding:0 12px',
+      'border-radius:11px',
+      'background-color:var(--menu-dark)',
+      'display:flex',
+      'align-items:center',
+      'justify-content:space-between',
+      'gap:10px',
+      'font-size:14px',
+      'color:var(--menu-text)',
+      'text-align:left',
+      'transition:background-color 0.14s ease, color 0.14s ease'
+    ].join(';');
+
+    const left = document.createElement('span');
+    left.style.cssText = 'display:inline-flex;align-items:center;gap:8px;min-width:0;';
+
+    const title = document.createElement('span');
+    title.textContent = 'TTS теги';
+    title.style.cssText = 'color:var(--menu-active-text);font-weight:400;white-space:nowrap;';
+
+    const hint = document.createElement('span');
+    hint.textContent = 'Выкл';
+    hint.style.cssText = 'font-size:12px;color:var(--text-meta);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+
+    left.appendChild(title);
+    left.appendChild(hint);
+
+    const box = document.createElement('span');
+    box.style.cssText = [
+      'width:18px',
+      'height:18px',
+      'flex-shrink:0',
+      'border-radius:5px',
+      'background-color:var(--bg-checkbox-off)',
+      'display:inline-flex',
+      'align-items:center',
+      'justify-content:center',
+      'transition:background-color 0.14s ease'
+    ].join(';');
+    box.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--pill-light-text)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" style="opacity:0;transition:opacity 0.14s ease;"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+
+    btn.appendChild(left);
+    btn.appendChild(box);
+    personaPanel.appendChild(btn);
+
+    btn.addEventListener('click', () => {
+      if (state.micState !== 'idle') return;
+      const nextVal = !Boolean(state.personaDraft.ttsTags);
+      state.personaDraft.ttsTags = nextVal;
+      if (state.personas[state.activePersonaIndex]) {
+        state.personas[state.activePersonaIndex].ttsTags = nextVal;
+      }
+      syncPersonaUI();
+      persistSettings(true);
+      renderFeed();
+    });
+
+    personaTtsTagsToggleBtn = btn;
+    personaTtsTagsHintEl = hint;
+    personaTtsTagsBoxEl = box;
+  }
+
   function syncPersonaClearBtn() {
     personaTextareaWrap.classList.toggle('has-text', personaInstructionsInput.value.length > 0);
   }
 
   function syncPersonaUI() {
+    ensurePersonaTtsTagsCheckbox();
     const idx = state.activePersonaIndex;
-    const activeSaved = state.personas[idx] || { name: '', instructions: '' };
+    const activeSaved = state.personas[idx] || { name: '', instructions: '', ttsTags: false };
 
     document.querySelectorAll('#personaPresetGroup .panel-preset-btn').forEach((btn) => {
       const i = Number(btn.dataset.personaPreset);
-      const p = state.personas[i] || { name: '', instructions: '' };
+      const p = state.personas[i] || { name: '', instructions: '', ttsTags: false };
       btn.textContent = p.name.trim() ? p.name.trim() : `Persona ${i + 1}`;
       btn.classList.toggle('active', i === idx);
     });
@@ -4511,6 +4814,16 @@
     personaNameInput.value = state.personaDraft.name;
     personaInstructionsInput.value = state.personaDraft.instructions;
     syncPersonaClearBtn();
+
+    if (personaTtsTagsToggleBtn && personaTtsTagsHintEl && personaTtsTagsBoxEl) {
+      const on = Boolean(state.personaDraft.ttsTags);
+      personaTtsTagsToggleBtn.setAttribute('aria-checked', String(on));
+      personaTtsTagsHintEl.textContent = on ? 'Скрыты · Grok <> / Gemini []' : 'Выкл';
+      personaTtsTagsHintEl.style.color = on ? 'var(--text-level)' : 'var(--text-meta)';
+      personaTtsTagsBoxEl.style.backgroundColor = on ? 'var(--pill-light-bg)' : 'var(--bg-checkbox-off)';
+      const svg = personaTtsTagsBoxEl.querySelector('svg');
+      if (svg) svg.style.opacity = on ? '1' : '0';
+    }
   }
 
   document.querySelectorAll('#personaPresetGroup .panel-preset-btn').forEach((btn) => {
@@ -4518,10 +4831,11 @@
       if (state.micState !== 'idle') return;
       const idx = Number(btn.dataset.personaPreset);
       state.activePersonaIndex = idx;
-      const p = state.personas[idx] || { name: '', instructions: '' };
-      state.personaDraft = { name: p.name, instructions: p.instructions };
+      const p = state.personas[idx] || { name: '', instructions: '', ttsTags: false };
+      state.personaDraft = { name: p.name, instructions: p.instructions, ttsTags: Boolean(p.ttsTags) };
       syncPersonaUI();
       persistSettings();
+      renderFeed();
     });
   });
 
@@ -4568,7 +4882,8 @@
     state.personaDraft.instructions = personaInstructionsInput.value;
     state.personas[idx] = {
       name: trimmedName,
-      instructions: state.personaDraft.instructions
+      instructions: state.personaDraft.instructions,
+      ttsTags: Boolean(state.personaDraft.ttsTags)
     };
     syncPersonaUI();
     persistSettings(true);
@@ -6391,7 +6706,8 @@
       if (Array.isArray(s.personas) && s.personas.length === 4) {
         state.personas = s.personas.map((p) => ({
           name: (p && p.name) || '',
-          instructions: (p && p.instructions) || ''
+          instructions: (p && p.instructions) || '',
+          ttsTags: Boolean(p && p.ttsTags)
         }));
       }
       if (typeof s.activePersonaIndex === 'number' && s.activePersonaIndex >= 0 && s.activePersonaIndex < 4) {
@@ -6399,7 +6715,11 @@
       }
       const activePer = state.personas[state.activePersonaIndex];
       if (activePer) {
-        state.personaDraft = { name: activePer.name, instructions: activePer.instructions };
+        state.personaDraft = {
+          name: activePer.name,
+          instructions: activePer.instructions,
+          ttsTags: Boolean(activePer.ttsTags)
+        };
       }
 
       if (s.modelId) {
