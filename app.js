@@ -2,7 +2,7 @@
   'use strict';
 
   /* =========================================================================
-     CONSTANTS & CATALOGS (STEP 3: REAL-TIME BALANCE, 24H STATS & FREE QUOTAS)
+     CONSTANTS & CATALOGS (STEP 4: TTS + STT + iOS SAFARI AUDIO MECHANICS)
      ========================================================================= */
   const DB_NAME = 'OpenRouterPWA_DB';
   const DB_VERSION = 1;
@@ -51,17 +51,17 @@
   ];
 
   const TTS_MODELS = [
-    { id: 'google/gemini-3.8-flash-lite-tts', name: 'Gemini 3.8 Flash Lite TTS' },
-    { id: 'google/gemini-3.8-flash-tts', name: 'Gemini 3.8 Flash TTS' },
-    { id: 'x-ai/grok-voice-tts-1.0', name: 'Grok Voice TTS 1.0' },
-    { id: 'elevenlabs/eleven-v4-turbo', name: 'Eleven v4 Turbo' },
-    { id: 'elevenlabs-byok', name: 'ElevenLabs BYOK' }
+    { id: 'google/gemini-3.8-flash-lite-tts', name: 'Gemini 3.8 Flash Lite TTS', usdPer1MChars: 9 },
+    { id: 'google/gemini-3.8-flash-tts', name: 'Gemini 3.8 Flash TTS', usdPer1MChars: 13 },
+    { id: 'x-ai/grok-voice-tts-1.0', name: 'Grok Voice TTS 1.0', usdPer1MChars: 15 },
+    { id: 'elevenlabs/eleven-v4-turbo', name: 'Eleven v4 Turbo', usdPer1MChars: 40 },
+    { id: 'elevenlabs-byok', name: 'ElevenLabs BYOK', usdPer1MChars: 0 }
   ];
 
   const STT_MODELS = [
-    { id: 'openai/whisper-large-v3', name: 'Whisper Large v3' },
-    { id: 'x-ai/grok-stt-2.0', name: 'Grok STT 2.0' },
-    { id: 'google/gemini-3.5-transcribe', name: 'Gemini 3.5 Transcribe' }
+    { id: 'openai/whisper-large-v3', name: 'Whisper Large v3', usdPerMin: 0.006 },
+    { id: 'x-ai/grok-stt-2.0', name: 'Grok STT 2.0', usdPerMin: 0.005 },
+    { id: 'google/gemini-3.5-transcribe', name: 'Gemini 3.5 Transcribe', usdPerMin: 0.004 }
   ];
 
   // Morph is fixed to Off at this stage
@@ -72,7 +72,30 @@
   const GEMINI_VOICES = [
     'Puck', 'Zephyr', 'Aoede', 'Charon',
     'Fenrir', 'Kore', 'Leda', 'Orus',
-    'Perseus', 'Callirrhoe', 'Autonoe', 'Enceladus'
+    'Perseus', 'Callirrhoe', 'Autonoe', 'Enceladus',
+    'Iapetus', 'Umbriel', 'Algieba', 'Despina',
+    'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia',
+    'Achernar', 'Alnilam', 'Schedar', 'Gacrux',
+    'Pulcherrima', 'Achird', 'Zubenelgenubi', 'Vindemiatrix',
+    'Sadachbia', 'Sadaltager', 'Sulafat'
+  ];
+
+  const GROK_FALLBACK_VOICES = ['Ara', 'Rex', 'Sal', 'Eve', 'Leo'];
+
+  const ELEVENLABS_OPENROUTER_FALLBACK_VOICES = [
+    'Rachel', 'Aria', 'Roger', 'Sarah', 'Charlie',
+    'George', 'Callum', 'Liam', 'Charlotte', 'Alice'
+  ];
+
+  const ELEVENLABS_BYOK_FALLBACK_VOICES = [
+    { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel' },
+    { id: '9BWtsMINqrJLrRacOk9x', name: 'Aria' },
+    { id: 'CwhRBWXzGAHq8TQ4Fs17', name: 'Roger' },
+    { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah' },
+    { id: 'IKne3meq5aSn9XLyUdCD', name: 'Charlie' },
+    { id: 'JBFqnCBsd6RMkjVDRZzb', name: 'George' },
+    { id: 'N2lVS1w4EtoT3dr4eOWO', name: 'Callum' },
+    { id: 'TX3LPaxmHKxFdv7VOQHJ', name: 'Liam' }
   ];
 
   const INITIAL_CHATS = [
@@ -608,9 +631,18 @@
     balanceError: '',
     statsTickTimer: null,
 
+    ttsVoicesByModel: {},
+    elevenByokVoices: ELEVENLABS_BYOK_FALLBACK_VOICES.slice(),
+
     openPopover: null,
     openInfoMsgId: null,
     ttsPlayingMsgId: null,
+    ttsSessionId: 0,
+    ttsAbortController: null,
+    ttsCurrentChunk: null,
+    ttsAppliedPitch: 1.0,
+    ttsActiveBlobUrl: null,
+    ttsPitchRepatchTimer: null,
 
     generatingMsgId: null,
     generatingChatId: null,
@@ -621,8 +653,12 @@
 
     micState: 'idle',
     recSeconds: 0,
+    recStartedAt: 0,
     recInterval: null,
-    transcribeTimer: null
+    mediaStream: null,
+    mediaRecorder: null,
+    recordedChunks: [],
+    recordedMimeType: ''
   };
 
   /* =========================================================================
@@ -2137,6 +2173,7 @@
       popoverMenu.querySelectorAll('[data-select-tts]').forEach((btn) => {
         btn.addEventListener('click', () => {
           state.ttsId = btn.dataset.selectTts;
+          ensureValidVoiceForCurrentTts();
           syncAudioPanelUI();
           persistSettings();
           closePopover();
@@ -2147,13 +2184,14 @@
     if (type === 'voice') {
       anchorEl.classList.add('open');
       popoverMenu.classList.add('selector-menu');
+      const voices = getVoicesForTtsModel(state.ttsId);
       const currentVoice = state.voiceDraft.voice;
       let html = '<div class="mdd-list">';
-      GEMINI_VOICES.forEach((v) => {
-        const sel = currentVoice === v ? 'selected' : '';
+      voices.forEach((v) => {
+        const sel = currentVoice === v.id || currentVoice === v.name ? 'selected' : '';
         html += `
-          <button class="model-opt ${sel}" data-select-voice="${v}">
-            <span>${v}</span>
+          <button class="model-opt ${sel}" data-select-voice="${escapeHtml(v.id)}">
+            <span>${escapeHtml(v.name)}</span>
             ${ICONS.mddCheck}
           </button>`;
       });
@@ -2270,19 +2308,851 @@
   /* =========================================================================
      3. CHAT FEED, LIVE-ONLY THINKING & 5-ICON MESSAGE FOOTER
      ========================================================================= */
+  /* =========================================================================
+     iOS SAFARI / WEBKIT TTS ENGINE:
+     - Single <audio> + SILENT_WAV_URL sync unlock inside user tap
+     - Dynamic voices via GET /api/v1/audio/speech/models + ElevenLabs BYOK
+     - Pristine original WAV cache (API always at 1.0x/1.0x)
+     - Non-destructive RIFF WAV sampleRate/byteRate patch + playbackRate comp
+     - Markdown cleanup + first-paragraph fast-start chunking + prefetch
+     ========================================================================= */
+  function createSilentWavDataUrl() {
+    const sampleRate = 8000;
+    const numSamples = 400; // 50ms silence
+    const dataSize = numSamples * 2;
+    const buf = new ArrayBuffer(44 + dataSize);
+    const v = new DataView(buf);
+    const writeStr = (off, s) => {
+      for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i));
+    };
+    writeStr(0, 'RIFF');
+    v.setUint32(4, 36 + dataSize, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); // PCM
+    v.setUint16(22, 1, true); // mono
+    v.setUint32(24, sampleRate, true);
+    v.setUint32(28, sampleRate * 2, true);
+    v.setUint16(32, 2, true);
+    v.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    v.setUint32(40, dataSize, true);
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return 'data:audio/wav;base64,' + btoa(bin);
+  }
+
+  const SILENT_WAV_URL = createSilentWavDataUrl();
+
+  const ttsAudio = new Audio();
+  ttsAudio.playsInline = true;
+  ttsAudio.setAttribute('playsinline', '');
+  ttsAudio.preload = 'auto';
+
+  let sharedDecodeAudioCtx = null;
+  const ttsOriginalWavCache = new Map();
+  const MAX_TTS_CACHE_ITEMS = 40;
+
+  function setAudioSessionType(type) {
+    try {
+      if (navigator.audioSession && typeof navigator.audioSession.type === 'string') {
+        navigator.audioSession.type = type;
+      }
+    } catch (_) {}
+  }
+
+  function setPreservesPitch(audioEl, enabled) {
+    try { audioEl.preservesPitch = enabled; } catch (_) {}
+    try { audioEl.webkitPreservesPitch = enabled; } catch (_) {}
+    try { audioEl.mozPreservesPitch = enabled; } catch (_) {}
+  }
+
+  function getDecodeAudioContext() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!sharedDecodeAudioCtx || sharedDecodeAudioCtx.state === 'closed') {
+      sharedDecodeAudioCtx = new AC();
+    }
+    return sharedDecodeAudioCtx;
+  }
+
+  // Must be called synchronously inside a user tap handler on iOS Safari
+  function unlockAudioSyncInUserGesture(forceSilentPrime = false) {
+    setAudioSessionType('playback');
+    try {
+      const ctx = getDecodeAudioContext();
+      if (ctx && ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+    } catch (_) {}
+
+    if (forceSilentPrime || !state.ttsPlayingMsgId) {
+      try {
+        ttsAudio.pause();
+        ttsAudio.src = SILENT_WAV_URL;
+        ttsAudio.currentTime = 0;
+        setPreservesPitch(ttsAudio, true);
+        ttsAudio.playbackRate = 1.0;
+        const p = ttsAudio.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch (_) {}
+    }
+  }
+
+  function getVoicesForTtsModel(ttsId) {
+    if (ttsId === 'elevenlabs-byok') {
+      return state.elevenByokVoices && state.elevenByokVoices.length > 0
+        ? state.elevenByokVoices
+        : ELEVENLABS_BYOK_FALLBACK_VOICES;
+    }
+
+    const dynamic = state.ttsVoicesByModel && state.ttsVoicesByModel[ttsId];
+    if (Array.isArray(dynamic) && dynamic.length > 0) {
+      return dynamic;
+    }
+
+    if (ttsId.includes('grok')) {
+      return GROK_FALLBACK_VOICES.map((v) => ({ id: v, name: v }));
+    }
+    if (ttsId.startsWith('elevenlabs/')) {
+      return ELEVENLABS_OPENROUTER_FALLBACK_VOICES.map((v) => ({ id: v, name: v }));
+    }
+    return GEMINI_VOICES.map((v) => ({ id: v, name: v }));
+  }
+
+  function resolveVoiceDisplayName(ttsId, voiceIdOrName) {
+    const list = getVoicesForTtsModel(ttsId);
+    const found = list.find((v) => v.id === voiceIdOrName || v.name === voiceIdOrName);
+    if (found) return found.name;
+    return voiceIdOrName || (list[0] ? list[0].name : 'Puck');
+  }
+
+  function resolveVoiceApiId(ttsId, voiceIdOrName) {
+    const list = getVoicesForTtsModel(ttsId);
+    const found = list.find((v) => v.id === voiceIdOrName || v.name === voiceIdOrName);
+    if (found) return found.id;
+    return list[0] ? list[0].id : (voiceIdOrName || 'Puck');
+  }
+
+  function ensureValidVoiceForCurrentTts() {
+    const list = getVoicesForTtsModel(state.ttsId);
+    if (!list || list.length === 0) return;
+    const cur = state.voiceDraft.voice;
+    const match = list.find((v) => v.id === cur || v.name === cur);
+    if (match) {
+      state.voiceDraft.voice = match.id;
+    } else {
+      state.voiceDraft.voice = list[0].id;
+    }
+  }
+
+  function normalizeVoiceList(rawVoices) {
+    if (!Array.isArray(rawVoices)) return [];
+    const out = [];
+    const seen = new Set();
+    rawVoices.forEach((v) => {
+      if (!v) return;
+      let id = '';
+      let name = '';
+      if (typeof v === 'string') {
+        id = v.trim();
+        name = id;
+      } else if (typeof v === 'object') {
+        id = String(v.id || v.voice_id || v.slug || v.name || '').trim();
+        name = String(v.name || v.label || id).trim();
+      }
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      out.push({ id, name });
+    });
+    return out;
+  }
+
+  async function fetchOpenRouterTtsModels() {
+    const headers = { Accept: 'application/json' };
+    const key = (state.apiKeys.openrouter || '').trim();
+    if (key) headers.Authorization = `Bearer ${key}`;
+
+    try {
+      const resp = await fetch(`${OPENROUTER_API_BASE}/audio/speech/models`, {
+        method: 'GET',
+        headers
+      });
+      if (!resp.ok) return;
+      const json = await resp.json();
+      const list = Array.isArray(json && json.data) ? json.data : (Array.isArray(json) ? json : []);
+      if (!list.length) return;
+
+      const updated = Object.assign({}, state.ttsVoicesByModel);
+      list.forEach((item) => {
+        if (!item || !item.id) return;
+        const voices = normalizeVoiceList(item.voices || item.supported_voices || (item.architecture && item.architecture.voices));
+        if (voices.length > 0) {
+          updated[item.id] = voices;
+        }
+      });
+
+      state.ttsVoicesByModel = updated;
+      idbPut('kv', { key: 'cachedTtsVoices', value: updated });
+      ensureValidVoiceForCurrentTts();
+      syncAudioPanelUI();
+    } catch (_) {}
+  }
+
+  async function fetchElevenLabsByokVoices() {
+    const elKey = (state.apiKeys.elevenlabs || '').trim();
+    if (!elKey) {
+      state.elevenByokVoices = ELEVENLABS_BYOK_FALLBACK_VOICES.slice();
+      return;
+    }
+    try {
+      const resp = await fetch('https://api.elevenlabs.io/v1/voices', {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          'xi-api-key': elKey
+        }
+      });
+      if (!resp.ok) return;
+      const json = await resp.json();
+      const voices = normalizeVoiceList(json && json.voices);
+      if (voices.length > 0) {
+        state.elevenByokVoices = voices;
+        idbPut('kv', { key: 'cachedElevenVoices', value: voices });
+        if (state.ttsId === 'elevenlabs-byok') {
+          ensureValidVoiceForCurrentTts();
+          syncAudioPanelUI();
+        }
+      }
+    } catch (_) {}
+  }
+
+  /* ---- WAV Parsing, Encoding & Non-Destructive Pitch/Speed Patching ---- */
+  function parseWavHeaderMetadata(arrayBuf) {
+    if (!arrayBuf || arrayBuf.byteLength < 44) return null;
+    const view = new DataView(arrayBuf);
+    const read4 = (off) =>
+      String.fromCharCode(
+        view.getUint8(off),
+        view.getUint8(off + 1),
+        view.getUint8(off + 2),
+        view.getUint8(off + 3)
+      );
+    if (read4(0) !== 'RIFF' || read4(8) !== 'WAVE') return null;
+
+    let offset = 12;
+    while (offset + 8 <= arrayBuf.byteLength) {
+      const chunkId = read4(offset);
+      const chunkSize = view.getUint32(offset + 4, true);
+      if (chunkId === 'fmt ' && offset + 8 + 16 <= arrayBuf.byteLength) {
+        const fmtStart = offset + 8;
+        const audioFormat = view.getUint16(fmtStart, true);
+        const numChannels = view.getUint16(fmtStart + 2, true);
+        const sampleRate = view.getUint32(fmtStart + 4, true);
+        const blockAlign = view.getUint16(fmtStart + 12, true);
+        const bitsPerSample = view.getUint16(fmtStart + 14, true);
+        if (audioFormat !== 1 && audioFormat !== 3) return null; // PCM or IEEE float only
+        if (!sampleRate || !blockAlign) return null;
+        return {
+          sampleRateOffset: fmtStart + 4,
+          byteRateOffset: fmtStart + 8,
+          origSampleRate: sampleRate,
+          blockAlign,
+          numChannels,
+          bitsPerSample
+        };
+      }
+      offset += 8 + chunkSize + (chunkSize % 2);
+    }
+    return null;
+  }
+
+  function wrapPcm16ToWav(pcmBytes, sampleRate = 24000, numChannels = 1) {
+    const bitsPerSample = 16;
+    const blockAlign = numChannels * (bitsPerSample / 8);
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = pcmBytes.byteLength;
+    const wavBuf = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(wavBuf);
+    const writeStr = (off, s) => {
+      for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+    };
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeStr(36, 'data');
+    view.setUint32(40, dataSize, true);
+    new Uint8Array(wavBuf, 44).set(new Uint8Array(pcmBytes));
+    return wavBuf;
+  }
+
+  function encodeAudioBufferToWav(audioBuffer) {
+    const numChannels = Math.min(2, audioBuffer.numberOfChannels || 1);
+    const sampleRate = audioBuffer.sampleRate || 24000;
+    const numFrames = audioBuffer.length;
+    const blockAlign = numChannels * 2;
+    const dataSize = numFrames * blockAlign;
+    const wavBuf = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(wavBuf);
+    const writeStr = (off, s) => {
+      for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+    };
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    const channels = [];
+    for (let ch = 0; ch < numChannels; ch++) {
+      channels.push(audioBuffer.getChannelData(ch));
+    }
+
+    let pos = 44;
+    for (let i = 0; i < numFrames; i++) {
+      for (let ch = 0; ch < numChannels; ch++) {
+        const sample = Math.max(-1, Math.min(1, channels[ch][i] || 0));
+        view.setInt16(pos, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+        pos += 2;
+      }
+    }
+    return wavBuf;
+  }
+
+  async function normalizeToCanonicalWav(rawArrayBuf, contentType = '', fallbackPcmRate = 0) {
+    const existingMeta = parseWavHeaderMetadata(rawArrayBuf);
+    if (existingMeta) {
+      return Object.assign({ originalWav: rawArrayBuf, isPatchableWav: true, mimeType: 'audio/wav' }, existingMeta);
+    }
+
+    if (fallbackPcmRate > 0 && (!contentType || contentType.includes('pcm') || contentType.includes('octet-stream'))) {
+      const wrapped = wrapPcm16ToWav(rawArrayBuf, fallbackPcmRate, 1);
+      const meta = parseWavHeaderMetadata(wrapped);
+      if (meta) {
+        return Object.assign({ originalWav: wrapped, isPatchableWav: true, mimeType: 'audio/wav' }, meta);
+      }
+    }
+
+    // Non-WAV audio (MP3/OGG/AAC): decode once into pristine 16-bit PCM WAV
+    try {
+      const ctx = getDecodeAudioContext();
+      if (ctx) {
+        const decoded = await ctx.decodeAudioData(rawArrayBuf.slice(0));
+        const wavBuf = encodeAudioBufferToWav(decoded);
+        const meta = parseWavHeaderMetadata(wavBuf);
+        if (meta) {
+          return Object.assign({ originalWav: wavBuf, isPatchableWav: true, mimeType: 'audio/wav' }, meta);
+        }
+      }
+    } catch (_) {}
+
+    // Last-resort fallback if browser cannot decode compressed format via WebAudio
+    return {
+      originalWav: rawArrayBuf,
+      isPatchableWav: false,
+      mimeType: contentType && contentType.startsWith('audio/') ? contentType.split(';')[0] : 'audio/mpeg',
+      origSampleRate: 24000,
+      blockAlign: 2,
+      sampleRateOffset: 24,
+      byteRateOffset: 28
+    };
+  }
+
+  // Always derives a fresh Blob from the untouched originalWav so returning to 1.00/1.00 = 100% original audio
+  function buildPatchedPlaybackSource(canonical, speed, pitch) {
+    const safeSpeed = Math.max(0.70, Math.min(1.60, Number(speed) || 1.0));
+    const safePitch = Math.max(0.75, Math.min(1.25, Number(pitch) || 1.0));
+
+    if (!canonical.isPatchableWav) {
+      return {
+        blob: new Blob([canonical.originalWav], { type: canonical.mimeType || 'audio/mpeg' }),
+        appliedPitch: 1.0,
+        playbackRate: safeSpeed
+      };
+    }
+
+    if (Math.abs(safePitch - 1.0) < 0.001) {
+      return {
+        blob: new Blob([canonical.originalWav], { type: 'audio/wav' }),
+        appliedPitch: 1.0,
+        playbackRate: safeSpeed
+      };
+    }
+
+    // Clone pristine buffer so cached originalWav is NEVER mutated
+    const patchedBuf = canonical.originalWav.slice(0);
+    const view = new DataView(patchedBuf);
+    const patchedRate = Math.max(8000, Math.min(192000, Math.round(canonical.origSampleRate * safePitch)));
+    const patchedByteRate = patchedRate * canonical.blockAlign;
+    view.setUint32(canonical.sampleRateOffset, patchedRate, true);
+    view.setUint32(canonical.byteRateOffset, patchedByteRate, true);
+
+    const actualPitchRatio = patchedRate / canonical.origSampleRate;
+    const compensatedRate = Math.max(0.5, Math.min(4.0, safeSpeed / actualPitchRatio));
+
+    return {
+      blob: new Blob([patchedBuf], { type: 'audio/wav' }),
+      appliedPitch: actualPitchRatio,
+      playbackRate: compensatedRate
+    };
+  }
+
+  /* ---- Markdown Cleanup & First-Paragraph Fast-Start Chunking ---- */
+  function cleanTextForTts(raw) {
+    if (!raw) return '';
+    let s = String(raw).replace(/\r\n/g, '\n');
+
+    // Remove fenced code blocks completely
+    s = s.replace(/```[\s\S]*?```/g, ' ');
+    // Convert markdown links [label](url) -> label
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '$1');
+    // Strip raw URLs
+    s = s.replace(/https?:\/\/\S+/g, ' ');
+    // Unwrap inline code
+    s = s.replace(/`([^`\n]+)`/g, '$1');
+    // Strip HTML tags (if any)
+    s = s.replace(/<[^>]+>/g, ' ');
+    // Strip markdown heading/quote/list prefixes
+    s = s.replace(/^[ \t]*(?:#{1,6}\s+|>\s?|[-*•]\s+)/gm, '');
+    // Strip bold/italic/strikethrough markers
+    s = s.replace(/(\*\*|__|~~)/g, '');
+    s = s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?:;]|$)/g, '$1$2');
+    // Normalize spaces while keeping paragraph breaks
+    s = s.replace(/[ \t]+/g, ' ');
+    s = s.replace(/\n{3,}/g, '\n\n');
+    return s.trim();
+  }
+
+  function splitTextByLimit(text, maxLen) {
+    const out = [];
+    let rest = text.trim();
+    while (rest.length > maxLen) {
+      let cut = -1;
+      const slice = rest.slice(0, maxLen + 1);
+      const sentRe = /[.!?…](?:\s|$)/g;
+      let m;
+      while ((m = sentRe.exec(slice)) !== null) {
+        if (m.index >= Math.floor(maxLen * 0.4)) {
+          cut = m.index + 1;
+        }
+      }
+      if (cut === -1) {
+        const commaIdx = slice.lastIndexOf(', ');
+        if (commaIdx >= Math.floor(maxLen * 0.5)) cut = commaIdx + 1;
+      }
+      if (cut === -1) {
+        const spaceIdx = slice.lastIndexOf(' ');
+        cut = spaceIdx >= Math.floor(maxLen * 0.4) ? spaceIdx : maxLen;
+      }
+      const head = rest.slice(0, cut).trim();
+      if (head) out.push(head);
+      rest = rest.slice(cut).trim();
+    }
+    if (rest) out.push(rest);
+    return out;
+  }
+
+  function chunkTextForTts(cleanedText) {
+    if (!cleanedText) return [];
+    const paragraphs = cleanedText
+      .split(/\n+/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (paragraphs.length === 0) return [];
+
+    const chunks = [];
+
+    // First paragraph isolated as chunk 0 (up to 550 chars) for fast start
+    const firstParts = splitTextByLimit(paragraphs[0], 550);
+    chunks.push(firstParts[0]);
+
+    const remainingPieces = firstParts.slice(1).concat(paragraphs.slice(1));
+    let current = '';
+    const MAX_CHUNK = 950;
+
+    remainingPieces.forEach((piece) => {
+      if (piece.length > MAX_CHUNK) {
+        if (current) {
+          chunks.push(current);
+          current = '';
+        }
+        splitTextByLimit(piece, MAX_CHUNK).forEach((sub) => chunks.push(sub));
+        return;
+      }
+      if (!current) {
+        current = piece;
+      } else if (current.length + 2 + piece.length <= MAX_CHUNK) {
+        current += '\n\n' + piece;
+      } else {
+        chunks.push(current);
+        current = piece;
+      }
+    });
+
+    if (current) chunks.push(current);
+    return chunks;
+  }
+
+  function putTtsCache(key, canonical) {
+    if (ttsOriginalWavCache.has(key)) {
+      ttsOriginalWavCache.delete(key);
+    }
+    ttsOriginalWavCache.set(key, canonical);
+    while (ttsOriginalWavCache.size > MAX_TTS_CACHE_ITEMS) {
+      const oldestKey = ttsOriginalWavCache.keys().next().value;
+      ttsOriginalWavCache.delete(oldestKey);
+    }
+  }
+
+  async function fetchTtsChunkCanonicalWav(chunkText, ttsId, voiceApiId, signal) {
+    const cacheKey = `${ttsId}::${voiceApiId}::${chunkText}`;
+    if (ttsOriginalWavCache.has(cacheKey)) {
+      const cached = ttsOriginalWavCache.get(cacheKey);
+      ttsOriginalWavCache.delete(cacheKey);
+      ttsOriginalWavCache.set(cacheKey, cached);
+      return cached;
+    }
+
+    const ttsModelMeta = TTS_MODELS.find((t) => t.id === ttsId) || TTS_MODELS[0];
+    let resp;
+    let fallbackPcmRate = 0;
+
+    if (ttsId === 'elevenlabs-byok') {
+      const elKey = (state.apiKeys.elevenlabs || '').trim();
+      if (!elKey) {
+        throw new Error('Не задан ElevenLabs Key. Откройте меню слева → «API ключи».');
+      }
+      const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceApiId)}?output_format=pcm_24000`;
+      fallbackPcmRate = 24000;
+      resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'audio/pcm, audio/mpeg',
+          'xi-api-key': elKey
+        },
+        body: JSON.stringify({
+          text: chunkText,
+          model_id: 'eleven_flash_v2_5'
+        }),
+        signal
+      });
+    } else {
+      let url = `${OPENROUTER_API_BASE}/audio/speech`;
+      let apiKey = (state.apiKeys.openrouter || '').trim();
+      let isOpenRouter = true;
+
+      if (state.provider === 'direct') {
+        const base = (state.apiKeys.customUrl || '').trim().replace(/\/+$/, '');
+        if (!base) {
+          throw new Error('Не указан Custom Endpoint URL в меню «API ключи».');
+        }
+        url = /\/audio\/speech$/i.test(base) ? base : `${base}/audio/speech`;
+        isOpenRouter = false;
+      } else if (!apiKey) {
+        throw new Error('Не задан OpenRouter Key. Откройте меню слева → «API ключи».');
+      }
+
+      const headers = {
+        'Content-Type': 'application/json',
+        Accept: 'audio/wav, audio/mpeg, */*'
+      };
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      if (isOpenRouter) {
+        headers['HTTP-Referer'] = window.location.origin || 'https://localhost';
+        headers['X-Title'] = 'OpenRouter PWA';
+      }
+
+      // Always generate at speed 1.0 so the cached WAV is pristine original audio
+      resp = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: ttsId,
+          input: chunkText,
+          voice: voiceApiId,
+          response_format: 'wav',
+          speed: 1.0
+        }),
+        signal
+      });
+
+      captureRateLimitHeaders(resp.headers, ttsId);
+    }
+
+    if (!resp.ok) {
+      const detail = await parseResponseErrorText(resp);
+      throw new Error(`TTS ошибка (${resp.status}): ${detail || 'сбой озвучки'}`);
+    }
+
+    const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+    const rawBuf = await resp.arrayBuffer();
+    if (!rawBuf || rawBuf.byteLength < 64) {
+      throw new Error('TTS вернул пустое аудио');
+    }
+
+    const canonical = await normalizeToCanonicalWav(rawBuf, contentType, fallbackPcmRate);
+    putTtsCache(cacheKey, canonical);
+
+    const estCost = ttsModelMeta && ttsModelMeta.usdPer1MChars
+      ? (chunkText.length / 1000000) * ttsModelMeta.usdPer1MChars
+      : 0;
+    recordUsageEntry({
+      type: 'tts',
+      modelId: ttsId,
+      modelLabel: ttsModelMeta ? ttsModelMeta.name : ttsId,
+      chars: chunkText.length,
+      cost: estCost,
+      isFree: false
+    });
+    scheduleBalanceRefreshAfterRequest();
+
+    return canonical;
+  }
+
+  function revokeActiveTtsBlobUrl() {
+    if (state.ttsActiveBlobUrl) {
+      try { URL.revokeObjectURL(state.ttsActiveBlobUrl); } catch (_) {}
+      state.ttsActiveBlobUrl = null;
+    }
+  }
+
   function stopActivePlayback() {
+    state.ttsSessionId += 1;
+    clearTimeout(state.ttsPitchRepatchTimer);
+    state.ttsPitchRepatchTimer = null;
+
+    if (state.ttsAbortController) {
+      const ctrl = state.ttsAbortController;
+      state.ttsAbortController = null;
+      try { ctrl.abort(); } catch (_) {}
+    }
+
+    ttsAudio.onended = null;
+    ttsAudio.onerror = null;
+    ttsAudio.onloadedmetadata = null;
+    try { ttsAudio.pause(); } catch (_) {}
+    revokeActiveTtsBlobUrl();
+
+    state.ttsCurrentChunk = null;
+    state.ttsAppliedPitch = 1.0;
     state.ttsPlayingMsgId = null;
     updateTtsIcons();
   }
 
-  function togglePlayback(msgId) {
+  function applyLiveSpeedToPlayingAudio() {
+    if (!state.ttsPlayingMsgId || !state.ttsCurrentChunk) return;
+    const safeSpeed = Math.max(0.70, Math.min(1.60, Number(state.voiceDraft.speed) || 1.0));
+    const appliedPitch = state.ttsAppliedPitch || 1.0;
+    const rate = Math.max(0.5, Math.min(4.0, safeSpeed / appliedPitch));
+    setPreservesPitch(ttsAudio, true);
+    try { ttsAudio.playbackRate = rate; } catch (_) {}
+  }
+
+  function repatchPlayingChunkWithCurrentPitch() {
+    if (!state.ttsPlayingMsgId || !state.ttsCurrentChunk || !state.ttsCurrentChunk.isPatchableWav) return;
+    const sessionId = state.ttsSessionId;
+    const prevTime = Number.isFinite(ttsAudio.currentTime) ? ttsAudio.currentTime : 0;
+    const prevDur = Number.isFinite(ttsAudio.duration) && ttsAudio.duration > 0 ? ttsAudio.duration : 0;
+    const progress = prevDur > 0 ? Math.max(0, Math.min(0.98, prevTime / prevDur)) : 0;
+
+    const { blob, appliedPitch, playbackRate } = buildPatchedPlaybackSource(
+      state.ttsCurrentChunk,
+      state.voiceDraft.speed,
+      state.voiceDraft.pitch
+    );
+    state.ttsAppliedPitch = appliedPitch;
+
+    const oldOnEnded = ttsAudio.onended;
+    const oldOnError = ttsAudio.onerror;
+    const nextUrl = URL.createObjectURL(blob);
+    revokeActiveTtsBlobUrl();
+    state.ttsActiveBlobUrl = nextUrl;
+
+    ttsAudio.onloadedmetadata = () => {
+      if (state.ttsSessionId !== sessionId) return;
+      if (progress > 0 && Number.isFinite(ttsAudio.duration) && ttsAudio.duration > 0) {
+        try { ttsAudio.currentTime = Math.min(ttsAudio.duration - 0.05, progress * ttsAudio.duration); } catch (_) {}
+      }
+      setPreservesPitch(ttsAudio, true);
+      try { ttsAudio.playbackRate = playbackRate; } catch (_) {}
+    };
+    ttsAudio.onended = oldOnEnded;
+    ttsAudio.onerror = oldOnError;
+    ttsAudio.src = nextUrl;
+    setPreservesPitch(ttsAudio, true);
+    try { ttsAudio.playbackRate = playbackRate; } catch (_) {}
+    const p = ttsAudio.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  }
+
+  function playCanonicalChunkOnSingleAudio(canonical, sessionId) {
+    return new Promise((resolve, reject) => {
+      if (state.ttsSessionId !== sessionId) {
+        resolve('aborted');
+        return;
+      }
+
+      setAudioSessionType('playback');
+      state.ttsCurrentChunk = canonical;
+      const { blob, appliedPitch, playbackRate } = buildPatchedPlaybackSource(
+        canonical,
+        state.voiceDraft.speed,
+        state.voiceDraft.pitch
+      );
+      state.ttsAppliedPitch = appliedPitch;
+
+      const blobUrl = URL.createObjectURL(blob);
+      revokeActiveTtsBlobUrl();
+      state.ttsActiveBlobUrl = blobUrl;
+
+      let settled = false;
+      const finish = (err) => {
+        if (settled) return;
+        settled = true;
+        ttsAudio.onended = null;
+        ttsAudio.onerror = null;
+        ttsAudio.onloadedmetadata = null;
+        if (err) reject(err);
+        else resolve('ended');
+      };
+
+      const enforceRate = () => {
+        if (state.ttsSessionId !== sessionId) return;
+        setPreservesPitch(ttsAudio, true);
+        const curSpeed = Math.max(0.70, Math.min(1.60, Number(state.voiceDraft.speed) || 1.0));
+        const curRate = Math.max(0.5, Math.min(4.0, curSpeed / (state.ttsAppliedPitch || 1.0)));
+        try { ttsAudio.playbackRate = curRate; } catch (_) {}
+      };
+
+      ttsAudio.onloadedmetadata = enforceRate;
+      ttsAudio.onended = () => finish(null);
+      ttsAudio.onerror = () => finish(new Error('Ошибка воспроизведения аудио'));
+
+      ttsAudio.src = blobUrl;
+      setPreservesPitch(ttsAudio, true);
+      try { ttsAudio.playbackRate = playbackRate; } catch (_) {}
+
+      const playPromise = ttsAudio.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise
+          .then(() => {
+            enforceRate();
+          })
+          .catch((err) => {
+            if (state.ttsSessionId !== sessionId) {
+              finish(null);
+            } else {
+              finish(err || new Error('Автовоспроизведение заблокировано iOS'));
+            }
+          });
+      }
+    });
+  }
+
+  function findMessageById(msgId) {
+    const chat = getActiveChat();
+    if (chat) {
+      const found = chat.messages.find((m) => m.id === msgId);
+      if (found) return found;
+    }
+    for (let i = 0; i < state.chats.length; i++) {
+      const found = state.chats[i].messages.find((m) => m.id === msgId);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  async function togglePlayback(msgId, fromUserGesture = true) {
     if (state.micState !== 'idle') return;
+
     if (state.ttsPlayingMsgId === msgId) {
       stopActivePlayback();
       return;
     }
+
+    stopActivePlayback();
+
+    const msg = findMessageById(msgId);
+    if (!msg) return;
+
+    const rawText = msg.role === 'user' ? (msg.text || '') : (msg.plainText || '');
+    const cleaned = cleanTextForTts(rawText);
+    const chunks = chunkTextForTts(cleaned);
+
+    if (chunks.length === 0) {
+      showToast('Нет текста для озвучки');
+      return;
+    }
+
+    // Synchronous silent WAV prime inside tap gesture for iOS Safari autoplay & background retention
+    if (fromUserGesture) {
+      unlockAudioSyncInUserGesture(true);
+    } else {
+      setAudioSessionType('playback');
+    }
+
+    const sessionId = ++state.ttsSessionId;
+    const controller = new AbortController();
+    state.ttsAbortController = controller;
     state.ttsPlayingMsgId = msgId;
     updateTtsIcons();
+
+    const ttsId = state.ttsId;
+    const voiceApiId = resolveVoiceApiId(ttsId, state.voiceDraft.voice);
+
+    try {
+      let nextChunkPromise = fetchTtsChunkCanonicalWav(chunks[0], ttsId, voiceApiId, controller.signal);
+
+      for (let i = 0; i < chunks.length; i++) {
+        if (state.ttsSessionId !== sessionId) return;
+
+        const canonical = await nextChunkPromise;
+        if (state.ttsSessionId !== sessionId) return;
+
+        // Prefetch next chunk while current chunk plays
+        if (i + 1 < chunks.length) {
+          nextChunkPromise = fetchTtsChunkCanonicalWav(chunks[i + 1], ttsId, voiceApiId, controller.signal);
+          nextChunkPromise.catch(() => {});
+        } else {
+          nextChunkPromise = null;
+        }
+
+        await playCanonicalChunkOnSingleAudio(canonical, sessionId);
+      }
+    } catch (err) {
+      if (state.ttsSessionId !== sessionId || (err && err.name === 'AbortError')) {
+        return;
+      }
+      showToast(err && err.message ? err.message : 'Ошибка озвучки TTS');
+    } finally {
+      if (state.ttsSessionId === sessionId) {
+        state.ttsAbortController = null;
+        state.ttsCurrentChunk = null;
+        state.ttsAppliedPitch = 1.0;
+        revokeActiveTtsBlobUrl();
+        state.ttsPlayingMsgId = null;
+        updateTtsIcons();
+      }
+    }
   }
 
   function updateTtsIcons() {
@@ -2764,7 +3634,7 @@
     const morphObj = MORPH_MODES.find((m) => m.id === state.morphId) || MORPH_MODES[0];
 
     ttsSelectLabel.textContent = ttsObj.name;
-    voiceSelectLabel.textContent = d.voice;
+    voiceSelectLabel.textContent = resolveVoiceDisplayName(state.ttsId, d.voice);
     sttSelectLabel.textContent = sttObj.name;
     morphSelectLabel.textContent = morphObj.name;
 
@@ -2790,6 +3660,10 @@
         state.voiceDraft = { voice: saved.voice, speed: saved.speed, pitch: saved.pitch };
       }
       syncAudioPanelUI();
+      applyLiveSpeedToPlayingAudio();
+      if (state.ttsPlayingMsgId && state.ttsCurrentChunk) {
+        repatchPlayingChunkWithCurrentPitch();
+      }
       persistSettings();
     });
   });
@@ -2797,11 +3671,25 @@
   speedSlider.addEventListener('input', () => {
     state.voiceDraft.speed = parseFloat(speedSlider.value);
     syncAudioPanelUI();
+    applyLiveSpeedToPlayingAudio();
   });
 
   pitchSlider.addEventListener('input', () => {
     state.voiceDraft.pitch = parseFloat(pitchSlider.value);
     syncAudioPanelUI();
+    if (state.ttsPlayingMsgId && state.ttsCurrentChunk) {
+      clearTimeout(state.ttsPitchRepatchTimer);
+      state.ttsPitchRepatchTimer = setTimeout(() => {
+        repatchPlayingChunkWithCurrentPitch();
+      }, 140);
+    }
+  });
+
+  pitchSlider.addEventListener('change', () => {
+    clearTimeout(state.ttsPitchRepatchTimer);
+    if (state.ttsPlayingMsgId && state.ttsCurrentChunk) {
+      repatchPlayingChunkWithCurrentPitch();
+    }
   });
 
   let voiceSaveFlashTimer = null;
@@ -2820,7 +3708,8 @@
       saveVoicePresetBtn.textContent = 'Save';
       saveVoicePresetBtn.classList.remove('saved');
     }, 1200);
-    showToast(`${state.activeVoicePreset}: ${state.voiceDraft.voice} · ${state.voiceDraft.speed.toFixed(2)}x`);
+    const vName = resolveVoiceDisplayName(state.ttsId, state.voiceDraft.voice);
+    showToast(`${state.activeVoicePreset}: ${vName} · ${state.voiceDraft.speed.toFixed(2)}x`);
   });
 
   /* =========================================================================
@@ -2978,7 +3867,74 @@
     }
   });
 
-  function startMicRecording() {
+  /* =========================================================================
+     REAL STT ENGINE: MediaRecorder -> /api/v1/audio/transcriptions
+     + iOS HARD track.stop() & navigator.audioSession.type = 'playback' RESET
+     ========================================================================= */
+  function releaseMicStreamAndRestoreAudio() {
+    if (state.mediaStream) {
+      try {
+        state.mediaStream.getTracks().forEach((track) => {
+          try { track.stop(); } catch (_) {}
+        });
+      } catch (_) {}
+      state.mediaStream = null;
+    }
+    state.mediaRecorder = null;
+    // Crucial on iOS Safari: return audio routing from earpiece to main loudspeaker
+    setAudioSessionType('playback');
+  }
+
+  function pickSupportedRecorderMimeType() {
+    if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+      return '';
+    }
+    const candidates = [
+      'audio/mp4',
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/aac'
+    ];
+    for (let i = 0; i < candidates.length; i++) {
+      try {
+        if (MediaRecorder.isTypeSupported(candidates[i])) return candidates[i];
+      } catch (_) {}
+    }
+    return '';
+  }
+
+  function getFileExtForAudioMime(mime) {
+    const m = String(mime || '').toLowerCase();
+    if (m.includes('mp4') || m.includes('m4a') || m.includes('aac')) return '.m4a';
+    if (m.includes('webm')) return '.webm';
+    if (m.includes('ogg')) return '.ogg';
+    if (m.includes('wav')) return '.wav';
+    return '.m4a';
+  }
+
+  function buildSttEndpoint() {
+    if (state.provider === 'direct') {
+      const base = (state.apiKeys.customUrl || '').trim().replace(/\/+$/, '');
+      if (!base) {
+        return { error: 'Не указан Custom Endpoint URL в меню «API ключи».' };
+      }
+      const url = /\/audio\/transcriptions$/i.test(base) ? base : `${base}/audio/transcriptions`;
+      return { url, apiKey: (state.apiKeys.openrouter || '').trim(), isOpenRouter: false };
+    }
+
+    const key = (state.apiKeys.openrouter || '').trim();
+    if (!key) {
+      return { error: 'Не задан OpenRouter Key. Откройте меню слева → «API ключи».' };
+    }
+    return {
+      url: `${OPENROUTER_API_BASE}/audio/transcriptions`,
+      apiKey: key,
+      isOpenRouter: true
+    };
+  }
+
+  async function startMicRecording() {
     closePopover();
     closeContextMenu();
     setBottomPanel(null);
@@ -2988,7 +3944,75 @@
       document.activeElement.blur();
     }
 
+    const endpoint = buildSttEndpoint();
+    if (endpoint.error) {
+      showToast(endpoint.error);
+      return;
+    }
+
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      showToast('Микрофон недоступен в этом браузере');
+      return;
+    }
+    if (typeof MediaRecorder === 'undefined') {
+      showToast('MediaRecorder не поддерживается');
+      return;
+    }
+
+    setAudioSessionType('play-and-record');
+
+    let stream = null;
+    try {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+      } catch (_) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+    } catch (err) {
+      releaseMicStreamAndRestoreAudio();
+      const name = err && err.name ? err.name : '';
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        showToast('Нет доступа к микрофону в настройках Safari');
+      } else {
+        showToast('Не удалось включить микрофон');
+      }
+      return;
+    }
+
+    const mimeType = pickSupportedRecorderMimeType();
+    let recorder;
+    try {
+      recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    } catch (_) {
+      try {
+        recorder = new MediaRecorder(stream);
+      } catch (err2) {
+        try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+        releaseMicStreamAndRestoreAudio();
+        showToast('Ошибка инициализации записи');
+        return;
+      }
+    }
+
+    state.mediaStream = stream;
+    state.mediaRecorder = recorder;
+    state.recordedChunks = [];
+    state.recordedMimeType = recorder.mimeType || mimeType || 'audio/mp4';
+
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        state.recordedChunks.push(e.data);
+      }
+    };
+
     state.recSeconds = 0;
+    state.recStartedAt = Date.now();
     micStatusTimer.textContent = '0:00';
     applyAppMicLock('recording');
 
@@ -2997,27 +4021,132 @@
       state.recSeconds += 1;
       micStatusTimer.textContent = formatMMSS(state.recSeconds);
     }, 1000);
+
+    try {
+      recorder.start(250);
+    } catch (_) {
+      clearInterval(state.recInterval);
+      state.recInterval = null;
+      releaseMicStreamAndRestoreAudio();
+      applyAppMicLock('idle');
+      showToast('Не удалось начать запись');
+    }
   }
 
-  function stopMicAndTranscribe() {
+  async function stopMicAndTranscribe() {
     clearInterval(state.recInterval);
     state.recInterval = null;
 
+    const recorder = state.mediaRecorder;
+    const elapsedSec = Math.max(1, Math.round((Date.now() - (state.recStartedAt || Date.now())) / 1000));
+
     applyAppMicLock('transcribing');
 
-    clearTimeout(state.transcribeTimer);
-    state.transcribeTimer = setTimeout(() => {
-      state.transcribeTimer = null;
+    try {
+      if (recorder && recorder.state !== 'inactive') {
+        await new Promise((resolve) => {
+          let done = false;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            resolve();
+          };
+          recorder.onstop = finish;
+          recorder.onerror = finish;
+          try {
+            recorder.stop();
+          } catch (_) {
+            finish();
+          }
+          setTimeout(finish, 1500);
+        });
+      }
 
-      const sampleDictation = 'Проверка STT (мок до Шага 4) — интерфейс разблокирован, можно править текст.';
+      // Immediately stop hardware mic tracks & restore loudspeaker session
+      releaseMicStreamAndRestoreAudio();
+
+      const mimeType = state.recordedMimeType || (state.recordedChunks[0] && state.recordedChunks[0].type) || 'audio/mp4';
+      const audioBlob = new Blob(state.recordedChunks, { type: mimeType });
+      state.recordedChunks = [];
+
+      if (!audioBlob || audioBlob.size < 256) {
+        showToast('Запись слишком короткая');
+        return;
+      }
+
+      const endpoint = buildSttEndpoint();
+      if (endpoint.error) {
+        showToast(endpoint.error);
+        return;
+      }
+
+      const sttId = state.sttId;
+      const sttMeta = STT_MODELS.find((s) => s.id === sttId) || STT_MODELS[0];
+      const ext = getFileExtForAudioMime(mimeType);
+      const fd = new FormData();
+      fd.append('file', audioBlob, `voice${ext}`);
+      fd.append('model', sttId);
+
+      const headers = {};
+      if (endpoint.apiKey) headers.Authorization = `Bearer ${endpoint.apiKey}`;
+      if (endpoint.isOpenRouter) {
+        headers['HTTP-Referer'] = window.location.origin || 'https://localhost';
+        headers['X-Title'] = 'OpenRouter PWA';
+      }
+
+      const resp = await fetch(endpoint.url, {
+        method: 'POST',
+        headers,
+        body: fd
+      });
+
+      captureRateLimitHeaders(resp.headers, sttId);
+
+      if (!resp.ok) {
+        const detail = await parseResponseErrorText(resp);
+        throw new Error(`STT ошибка (${resp.status}): ${detail || 'сбой распознавания'}`);
+      }
+
+      const ct = (resp.headers.get('content-type') || '').toLowerCase();
+      let transcript = '';
+      if (ct.includes('application/json')) {
+        const json = await resp.json();
+        transcript = String((json && (json.text || (json.data && json.data.text))) || '').trim();
+      } else {
+        transcript = String(await resp.text()).trim();
+      }
+
+      const estCost = sttMeta && sttMeta.usdPerMin
+        ? (elapsedSec / 60) * sttMeta.usdPerMin
+        : 0;
+      recordUsageEntry({
+        type: 'stt',
+        modelId: sttId,
+        modelLabel: sttMeta ? sttMeta.name : sttId,
+        seconds: elapsedSec,
+        cost: estCost,
+        isFree: false
+      });
+      scheduleBalanceRefreshAfterRequest();
+
+      if (!transcript) {
+        showToast('Речь не распознана');
+        return;
+      }
+
+      // Insert into input field WITHOUT auto-sending
       const existing = chatInput.value.trim();
-      chatInput.value = existing ? `${existing} ${sampleDictation}` : sampleDictation;
-
+      chatInput.value = existing ? `${existing} ${transcript}` : transcript;
+    } catch (err) {
+      releaseMicStreamAndRestoreAudio();
+      showToast(err && err.message ? err.message : 'Ошибка транскрибации');
+    } finally {
+      releaseMicStreamAndRestoreAudio();
       applyAppMicLock('idle');
       updateComposerLayout();
       syncSendButton();
       updateScrollBottomBtn();
-    }, 1400);
+    }
   }
 
   micBtn.addEventListener('click', () => {
@@ -3183,6 +4312,11 @@
 
     const text = chatInput.value.trim();
     if (!text) return;
+
+    // Unlock iOS Safari single <audio> synchronously inside Send tap when Auto TTS is enabled
+    if (state.autoTts) {
+      unlockAudioSyncInUserGesture(true);
+    }
 
     setBottomPanel(null);
     closePopover();
@@ -3477,7 +4611,7 @@
         }
 
         if (!aiMsg.isError && aiMsg.plainText && state.autoTts && state.micState === 'idle') {
-          togglePlayback(aiId);
+          togglePlayback(aiId, false);
         }
       }
     }
@@ -3518,6 +4652,7 @@
       lastFetchedOrKey = state.apiKeys.openrouter;
       fetchGeminiModelsFromOpenRouter(false);
       fetchOpenRouterBalance(false);
+      fetchOpenRouterTtsModels();
     };
 
     if (immediateFetch) {
@@ -3552,6 +4687,12 @@
     elevenKeyInput.addEventListener('change', () => {
       state.apiKeys.elevenlabs = (elevenKeyInput.value || '').trim();
       persistSettings(true);
+      fetchElevenLabsByokVoices();
+    });
+    elevenKeyInput.addEventListener('blur', () => {
+      state.apiKeys.elevenlabs = (elevenKeyInput.value || '').trim();
+      persistSettings(true);
+      fetchElevenLabsByokVoices();
     });
   }
 
@@ -4099,10 +5240,18 @@
      ASYNC INITIALIZATION (HYDRATE INDEXEDDB -> RENDER -> FETCH MODELS)
      ========================================================================= */
   async function hydrateFromIndexedDB() {
-    // 1. Load cached Gemini models first (fast boot)
+    // 1. Load cached Gemini models & TTS voice catalogs first (fast boot)
     const cachedModelsRec = await idbGet('kv', 'cachedGeminiModels');
     if (cachedModelsRec && cachedModelsRec.value && Array.isArray(cachedModelsRec.value.models) && cachedModelsRec.value.models.length > 0) {
       state.chatModels = cachedModelsRec.value.models;
+    }
+    const cachedTtsVoicesRec = await idbGet('kv', 'cachedTtsVoices');
+    if (cachedTtsVoicesRec && cachedTtsVoicesRec.value && typeof cachedTtsVoicesRec.value === 'object') {
+      state.ttsVoicesByModel = cachedTtsVoicesRec.value;
+    }
+    const cachedElevenRec = await idbGet('kv', 'cachedElevenVoices');
+    if (cachedElevenRec && Array.isArray(cachedElevenRec.value) && cachedElevenRec.value.length > 0) {
+      state.elevenByokVoices = cachedElevenRec.value;
     }
 
     // 2. Load settings
@@ -4236,9 +5385,16 @@
     renderFeed();
     renderChatList();
 
-    // Fetch live Gemini text models & account balance from OpenRouter on startup
+    ensureValidVoiceForCurrentTts();
+    syncAudioPanelUI();
+
+    // Fetch live Gemini text models, TTS voices & account balance on startup
     fetchGeminiModelsFromOpenRouter(false);
     fetchOpenRouterBalance(false);
+    fetchOpenRouterTtsModels();
+    if ((state.apiKeys.elevenlabs || '').trim()) {
+      fetchElevenLabsByokVoices();
+    }
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
