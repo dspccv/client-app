@@ -2,7 +2,7 @@
   'use strict';
 
   /* =========================================================================
-     CONSTANTS & CATALOGS (STEP 4.1: IDB TTS CACHE + CHUNK0 +25% + STRICT 1-AHEAD + NO BATCH)
+     CONSTANTS & CATALOGS (STEP 4.4: TTS FORMAT AUTO-DETECT + STRICT ABORT + RETRY & EDIT)
      ========================================================================= */
   const DB_NAME = 'OpenRouterPWA_DB';
   const DB_VERSION = 2;
@@ -575,6 +575,8 @@
     },
 
     chatModels: JSON.parse(JSON.stringify(FALLBACK_GEMINI_MODELS)),
+    modelCapsOverrides: {},
+    endpointProbedAt: {},
     modelsLoading: false,
     modelsLoadedFromApi: false,
     modelsError: '',
@@ -635,13 +637,24 @@
     statsTickTimer: null,
 
     ttsVoicesByModel: {},
+    ttsFormatsByModel: {},
+    ttsFormatOverrides: {},
     elevenByokVoices: ELEVENLABS_BYOK_FALLBACK_VOICES.slice(),
 
     openPopover: null,
     openInfoMsgId: null,
+    editingMsgId: null,
+    editingMsgDraft: '',
     ttsPlayingMsgId: null,
+    ttsPaused: false,
+    ttsActiveModelId: null,
+    ttsActiveVoiceApiId: null,
+    ttsPausedTime: 0,
+    ttsPausedDuration: 0,
+    ttsPitchChangedWhilePaused: false,
     ttsSessionId: 0,
     ttsAbortController: null,
+    ttsResolveCurrentPlay: null,
     ttsCurrentChunk: null,
     ttsAppliedPitch: 1.0,
     ttsActiveBlobUrl: null,
@@ -1042,6 +1055,31 @@
     return m ? parseFloat(m[1]) : 0;
   }
 
+  const VALID_EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high'];
+
+  function normalizeEffortList(arr) {
+    if (!Array.isArray(arr)) return [];
+    const set = new Set(arr.map((x) => String(x || '').toLowerCase().trim()));
+    return VALID_EFFORT_ORDER.filter((lvl) => set.has(lvl));
+  }
+
+  function extractExplicitEffortsFromMeta(raw) {
+    if (!raw || typeof raw !== 'object') return [];
+    const candidates = [
+      raw.supported_reasoning_efforts,
+      raw.reasoning_efforts,
+      raw.reasoning && raw.reasoning.supported_efforts,
+      raw.reasoning && raw.reasoning.efforts,
+      raw.architecture && raw.architecture.supported_reasoning_efforts,
+      raw.architecture && raw.architecture.reasoning_efforts
+    ];
+    for (let i = 0; i < candidates.length; i++) {
+      const normalized = normalizeEffortList(candidates[i]);
+      if (normalized.length > 0) return normalized;
+    }
+    return [];
+  }
+
   function deriveThinkingLevels(raw) {
     const id = (raw.id || '').toLowerCase();
     const params = Array.isArray(raw.supported_parameters)
@@ -1064,23 +1102,146 @@
       return { supportsReasoning: false, thinkingLevels: ['none'] };
     }
 
-    const ver = parseGeminiVersionScore(id);
+    // Trust explicit effort enum from API metadata if present
+    const explicit = extractExplicitEffortsFromMeta(raw);
+    if (explicit.length > 0) {
+      return { supportsReasoning: true, thinkingLevels: explicit };
+    }
 
-    // Gemini 2.5 Pro and dedicated *-thinking models cannot disable reasoning
-    if (id.includes('thinking') || (/gemini-2\.5-pro/.test(id) && !id.includes('flash'))) {
+    const ver = parseGeminiVersionScore(id);
+    const isFlashOrLite = id.includes('flash') || id.includes('lite');
+    const isProOrUltra = (id.includes('pro') || id.includes('ultra')) && !isFlashOrLite;
+
+    // Gemini 2.5 Pro, 3.x Pro, and dedicated *-thinking models require low..high
+    if (id.includes('thinking') || (/gemini-2\.5-pro/.test(id) && !isFlashOrLite) || (ver >= 3 && ver < 4 && isProOrUltra)) {
       return { supportsReasoning: true, thinkingLevels: ['low', 'medium', 'high'] };
     }
 
-    // Gemini 3.x / 4.x+ support minimal as well
-    if (ver >= 3) {
-      if (id.includes('pro') && !id.includes('flash')) {
-        return { supportsReasoning: true, thinkingLevels: ['low', 'medium', 'high'] };
-      }
+    // Gemini 4.x flagship / non-flash models (e.g. 4 Argon, 4 Hydrogen): reasoning is mandatory (no 'none'), minimal..high allowed
+    if (ver >= 4 && !isFlashOrLite) {
+      return { supportsReasoning: true, thinkingLevels: ['minimal', 'low', 'medium', 'high'] };
+    }
+
+    // Gemini 3.x / 4.x Flash & Flash-Lite: toggleable including minimal
+    if (ver >= 3 && isFlashOrLite) {
       return { supportsReasoning: true, thinkingLevels: ['none', 'minimal', 'low', 'medium', 'high'] };
     }
 
-    // Gemini 2.5 Flash / Flash-Lite and other toggleable reasoning models
-    return { supportsReasoning: true, thinkingLevels: ['none', 'low', 'medium', 'high'] };
+    // Gemini 2.5 Flash / Flash-Lite: toggleable without minimal
+    if (ver >= 2.5 && isFlashOrLite) {
+      return { supportsReasoning: true, thinkingLevels: ['none', 'low', 'medium', 'high'] };
+    }
+
+    return { supportsReasoning: true, thinkingLevels: ['low', 'medium', 'high'] };
+  }
+
+  function applyModelCapsOverride(modelObj) {
+    if (!modelObj || !modelObj.id) return modelObj;
+    const ov = state.modelCapsOverrides && state.modelCapsOverrides[modelObj.id];
+    if (!ov || typeof ov !== 'object') return modelObj;
+    if (typeof ov.supportsReasoning === 'boolean') {
+      modelObj.supportsReasoning = ov.supportsReasoning;
+    }
+    if (Array.isArray(ov.thinkingLevels) && ov.thinkingLevels.length > 0) {
+      const cleaned = normalizeEffortList(ov.thinkingLevels);
+      if (cleaned.length > 0) {
+        modelObj.thinkingLevels = cleaned;
+      }
+    }
+    if (typeof ov.supportsFlex === 'boolean') {
+      modelObj.supportsFlex = ov.supportsFlex;
+    }
+    return modelObj;
+  }
+
+  function saveModelCapsOverride(modelId, patch) {
+    if (!modelId || !patch) return;
+    const prev = state.modelCapsOverrides[modelId] || {};
+    state.modelCapsOverrides[modelId] = Object.assign({}, prev, patch, { updatedAt: Date.now() });
+    idbPut('kv', { key: 'modelCapsOverrides', value: state.modelCapsOverrides });
+
+    const m = state.chatModels.find((item) => item.id === modelId);
+    if (m) {
+      applyModelCapsOverride(m);
+      if (state.modelId === modelId) {
+        coerceThinkingForModel(m);
+        state.modelSupportsFlex = Boolean(m.supportsFlex);
+        syncHeaderUI();
+        persistSettings();
+      }
+    }
+    if (state.openPopover === 'model') {
+      renderModelDropdownContent();
+    }
+  }
+
+  async function fetchModelEndpointsCapabilities(modelId) {
+    if (!modelId || state.provider !== 'openrouter') return;
+    const cleanId = String(modelId).split(':')[0];
+    const parts = cleanId.split('/');
+    if (parts.length !== 2) return;
+
+    const lastProbed = state.endpointProbedAt[modelId] || 0;
+    if (Date.now() - lastProbed < 6 * 60 * 60 * 1000) return;
+    state.endpointProbedAt[modelId] = Date.now();
+
+    try {
+      const headers = { Accept: 'application/json' };
+      const key = (state.apiKeys.openrouter || '').trim();
+      if (key) headers.Authorization = `Bearer ${key}`;
+
+      const url = `${OPENROUTER_API_BASE}/models/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}/endpoints`;
+      const resp = await fetch(url, { method: 'GET', headers });
+      if (!resp.ok) return;
+      const json = await resp.json();
+      const data = (json && json.data) || {};
+      const endpoints = Array.isArray(data.endpoints) ? data.endpoints : [];
+      if (endpoints.length === 0) return;
+
+      const paramSet = new Set();
+      let explicitEfforts = [];
+      let mandatoryReasoning = false;
+
+      endpoints.forEach((ep) => {
+        if (!ep || typeof ep !== 'object') return;
+        if (Array.isArray(ep.supported_parameters)) {
+          ep.supported_parameters.forEach((p) => paramSet.add(String(p).toLowerCase()));
+        }
+        const epEfforts = extractExplicitEffortsFromMeta(ep);
+        if (epEfforts.length > 0 && explicitEfforts.length === 0) {
+          explicitEfforts = epEfforts;
+        }
+        if (ep.reasoning_required === true || ep.mandatory_reasoning === true) {
+          mandatoryReasoning = true;
+        }
+      });
+
+      const hasReasoning =
+        paramSet.has('reasoning') ||
+        paramSet.has('include_reasoning') ||
+        paramSet.has('reasoning_effort');
+
+      const patch = {};
+      if (paramSet.size > 0 && !hasReasoning) {
+        patch.supportsReasoning = false;
+        patch.thinkingLevels = ['none'];
+      } else if (explicitEfforts.length > 0) {
+        patch.supportsReasoning = true;
+        patch.thinkingLevels = explicitEfforts;
+      } else if (mandatoryReasoning) {
+        const cur = state.chatModels.find((m) => m.id === modelId);
+        const curLevels = (cur && cur.thinkingLevels) || ['minimal', 'low', 'medium', 'high'];
+        const withoutNone = curLevels.filter((l) => l !== 'none');
+        if (withoutNone.length > 0) {
+          patch.supportsReasoning = true;
+          patch.thinkingLevels = withoutNone;
+        }
+      }
+
+      if (Object.keys(patch).length > 0) {
+        saveModelCapsOverride(modelId, patch);
+      }
+    } catch (_) {}
   }
 
   function deriveFlexSupport(raw) {
@@ -1107,7 +1268,7 @@
       const promptPrice = parseFloat(raw.pricing && raw.pricing.prompt) || 0;
       const completionPrice = parseFloat(raw.pricing && raw.pricing.completion) || 0;
 
-      mapped.push({
+      mapped.push(applyModelCapsOverride({
         id,
         label: formatGeminiShortLabel(raw),
         fullName: raw.name || id,
@@ -1120,7 +1281,7 @@
           prompt: promptPrice,
           completion: completionPrice
         }
-      });
+      }));
     });
 
     // Sort: newest version first, paid before :free, Pro/Flagship -> Flash -> Lite
@@ -1181,12 +1342,14 @@
   function applySelectedModel(modelObj, shouldPersist = true) {
     const target = modelObj || getCurrentModelObj();
     if (!target) return;
+    applyModelCapsOverride(target);
     state.modelId = target.id;
     state.modelLabel = target.label;
     state.modelSupportsFlex = Boolean(target.supportsFlex);
     coerceThinkingForModel(target);
     syncHeaderUI();
     if (shouldPersist) persistSettings();
+    fetchModelEndpointsCapabilities(target.id);
   }
 
   async function fetchGeminiModelsFromOpenRouter(showFeedback = false) {
@@ -1265,12 +1428,14 @@
     trash: '<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>',
     speaker: '<svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>',
     stopAudio: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"></rect></svg>',
+    pauseAudio: '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.2" fill="currentColor" stroke="none"></rect><rect x="14" y="5" width="4" height="14" rx="1.2" fill="currentColor" stroke="none"></rect></svg>',
     moreDots: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"></circle></svg>',
     chevron: '<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>',
     chevronRight: '<svg viewBox="0 0 24 24"><polyline points="9 6 15 12 9 18"></polyline></svg>',
     flexBolt: '<svg viewBox="0 0 24 24"><polygon points="13 2 4 14 12 14 11 22 20 10 12 10 13 2"></polygon></svg>',
     mddCheck: '<svg class="mdd-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>',
     editPencil: '<svg viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path></svg>',
+    retry: '<svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>',
     pushpin: '<svg viewBox="0 0 24 24"><path d="M12 17v5"></path><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"></path></svg>',
     micIdle: '<rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line>',
     micStop: '<rect x="7" y="7" width="10" height="10" rx="2.4" fill="currentColor" stroke="none"></rect>',
@@ -1475,7 +1640,9 @@
   function syncFloatingPanelsPosition() {
     const rect = tier2Row.getBoundingClientRect();
     if (!rect.height) return;
-    const bottomOffset = Math.max(120, Math.round(window.innerHeight - rect.top + 10));
+    const shellRect = appShell.getBoundingClientRect();
+    const refBottom = shellRect.height > 0 ? shellRect.bottom : window.innerHeight;
+    const bottomOffset = Math.max(76, Math.round(refBottom - rect.top + 10));
     floatingPanelsLayer.style.setProperty('--panels-bottom', `${bottomOffset}px`);
   }
 
@@ -1538,21 +1705,85 @@
 
   /* =========================================================================
      iOS VISUAL VIEWPORT KEYBOARD ANCHORING
+     Anchor bottomDock & floatingPanelsLayer strictly inside appShell (position: absolute)
+     so iOS Safari PWA keyboard animations can never hide the composer behind the keyboard.
      ========================================================================= */
+  bottomDock.style.position = 'absolute';
+  bottomDock.style.left = '0px';
+  bottomDock.style.right = '0px';
+  bottomDock.style.bottom = '0px';
+  floatingPanelsLayer.style.position = 'absolute';
+  floatingPanelsLayer.style.inset = '0px';
+
+  let baseViewportHeight = Math.max(
+    window.innerHeight || 0,
+    window.visualViewport ? Math.round(window.visualViewport.height) : 0
+  );
+  let viewportSyncTimers = [];
+
+  function syncViewport() {
+    const vv = window.visualViewport;
+    const vh = vv ? Math.round(vv.height) : window.innerHeight;
+    const vTop = vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
+
+    if (!isEditableTarget(document.activeElement) && vh > baseViewportHeight) {
+      baseViewportHeight = vh;
+    }
+
+    const kbDelta = Math.max(window.innerHeight - vh, baseViewportHeight - vh);
+    const isKbOpen = kbDelta > 100;
+
+    appShell.style.height = `${vh}px`;
+    appShell.style.top = `${vTop}px`;
+    bottomDock.style.bottom = '0px';
+    bottomDock.style.paddingBottom = isKbOpen ? '8px' : '';
+
+    syncFloatingPanelsPosition();
+    updateScrollBottomBtn();
+  }
+
+  function scheduleViewportSync() {
+    viewportSyncTimers.forEach((t) => clearTimeout(t));
+    viewportSyncTimers = [];
+    syncViewport();
+    requestAnimationFrame(syncViewport);
+    [60, 180, 340, 520].forEach((ms) => {
+      viewportSyncTimers.push(setTimeout(syncViewport, ms));
+    });
+  }
+
   if (window.visualViewport) {
-    const syncViewport = () => {
-      const vv = window.visualViewport;
-      appShell.style.height = `${vv.height}px`;
-      appShell.style.top = `${vv.offsetTop}px`;
-      const kbOffset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-      bottomDock.style.bottom = `${kbOffset}px`;
-      window.scrollTo(0, 0);
-      syncFloatingPanelsPosition();
-      updateScrollBottomBtn();
-    };
     window.visualViewport.addEventListener('resize', syncViewport);
     window.visualViewport.addEventListener('scroll', syncViewport);
   }
+
+  document.addEventListener('focusin', (e) => {
+    if (!isEditableTarget(e.target)) return;
+    scheduleViewportSync();
+    if (e.target === chatInput) {
+      setTimeout(() => {
+        if (window.scrollY !== 0) {
+          try { window.scrollTo(0, 0); } catch (_) {}
+        }
+        syncViewport();
+      }, 120);
+    }
+  });
+
+  document.addEventListener('focusout', (e) => {
+    if (!isEditableTarget(e.target)) return;
+    setTimeout(() => {
+      if (!isEditableTarget(document.activeElement)) {
+        try { window.scrollTo(0, 0); } catch (_) {}
+      }
+      scheduleViewportSync();
+    }, 80);
+  });
+
+  window.addEventListener('orientationchange', () => {
+    baseViewportHeight = 0;
+    scheduleViewportSync();
+  });
 
   /* =========================================================================
      SCROLL-TO-BOTTOM FLOATING BUTTON VISIBILITY
@@ -1954,9 +2185,19 @@
   /* =========================================================================
      2. POPOVERS: DYNAMIC GEMINI MODELS, PER-MODEL THINKING, FLEX, AUDIO, •••
      ========================================================================= */
+  function getTopSafeInsetPx() {
+    const hdr = document.getElementById('topHeader');
+    if (hdr) {
+      const pt = parseFloat(window.getComputedStyle(hdr).paddingTop);
+      if (Number.isFinite(pt) && pt > 0) return pt;
+    }
+    return 12;
+  }
+
   function closePopover() {
     state.openPopover = null;
     state.openInfoMsgId = null;
+    popoverMenu.style.maxHeight = '';
     popoverMenu.classList.remove('open', 'drop-up', 'gemini-model-menu', 'selector-menu', 'info-popover');
     popoverBackdrop.classList.remove('visible');
     document.querySelectorAll('.gemini-model-trigger.open, .panel-select-btn.open, .msg-icon-btn.info-open').forEach((el) => {
@@ -1976,43 +2217,55 @@
     const shellRect = appShell.getBoundingClientRect();
     const rect = anchorEl.getBoundingClientRect();
 
+    const gap = 8;
+    const topSafe = Math.max(12, Math.ceil(getTopSafeInsetPx()) + 6);
+    const bottomSafe = 16;
+
+    const spaceAbove = Math.max(96, Math.floor(rect.top - shellRect.top - topSafe - gap));
+    const spaceBelow = Math.max(96, Math.floor(shellRect.bottom - rect.bottom - bottomSafe - gap));
+
     popoverMenu.style.top = 'auto';
     popoverMenu.style.bottom = 'auto';
     popoverMenu.style.left = 'auto';
     popoverMenu.style.right = 'auto';
+    popoverMenu.style.maxHeight = '';
+    popoverMenu.style.overscrollBehavior = 'contain';
     popoverMenu.style.width = fixedWidth ? `${fixedWidth}px` : (matchWidth ? `${Math.max(rect.width, 210)}px` : 'auto');
 
-    const measuredH = popoverMenu.offsetHeight || 160;
+    const naturalH = popoverMenu.scrollHeight || popoverMenu.offsetHeight || 160;
     const measuredW = fixedWidth || popoverMenu.offsetWidth || 240;
 
     let shouldDropUp = dropUp;
     if (autoFlip) {
-      const spaceBelow = shellRect.bottom - rect.bottom - 12;
-      const spaceAbove = rect.top - shellRect.top - 12;
-      if (spaceBelow < measuredH + 10 && spaceAbove > spaceBelow) {
+      if (spaceBelow < naturalH + 10 && spaceAbove > spaceBelow) {
         shouldDropUp = true;
       }
+    } else if (shouldDropUp && spaceAbove < 140 && spaceBelow > spaceAbove) {
+      shouldDropUp = false;
     }
+
+    const availH = shouldDropUp ? spaceAbove : spaceBelow;
+    popoverMenu.style.maxHeight = `${availH}px`;
 
     if (shouldDropUp) {
       popoverMenu.classList.add('drop-up');
-      const bottomOffset = shellRect.bottom - rect.top + 8;
+      const bottomOffset = Math.round(shellRect.bottom - rect.top + gap);
       popoverMenu.style.bottom = `${bottomOffset}px`;
     } else {
       popoverMenu.classList.remove('drop-up');
-      popoverMenu.style.top = `${rect.bottom - shellRect.top + 8}px`;
+      popoverMenu.style.top = `${Math.round(rect.bottom - shellRect.top + gap)}px`;
     }
 
     if (align === 'center') {
       const leftOffset = Math.max(10, Math.round((shellRect.width - measuredW) / 2));
       popoverMenu.style.left = `${leftOffset}px`;
     } else if (align === 'right') {
-      const rightOffset = Math.max(10, shellRect.right - rect.right);
+      const rightOffset = Math.max(10, Math.round(shellRect.right - rect.right));
       popoverMenu.style.right = `${rightOffset}px`;
     } else {
       let leftOffset = rect.left - shellRect.left;
       const maxLeft = shellRect.width - measuredW - 10;
-      leftOffset = Math.max(10, Math.min(leftOffset, Math.max(10, maxLeft)));
+      leftOffset = Math.max(10, Math.min(Math.round(leftOffset), Math.max(10, Math.round(maxLeft))));
       popoverMenu.style.left = `${leftOffset}px`;
     }
   }
@@ -2295,6 +2548,13 @@
 
     popoverBackdrop.classList.add('visible');
     popoverMenu.classList.add('open');
+
+    popoverMenu.scrollTop = 0;
+    const selectedEl = popoverMenu.querySelector('.selected');
+    if (selectedEl && popoverMenu.scrollHeight > popoverMenu.clientHeight) {
+      const targetTop = selectedEl.offsetTop - Math.floor((popoverMenu.clientHeight - selectedEl.offsetHeight) / 2);
+      popoverMenu.scrollTop = Math.max(0, targetTop);
+    }
   }
 
   document.querySelectorAll('[data-popover]').forEach((btn) => {
@@ -2315,6 +2575,8 @@
         closePopover();
       } else if (state.activeBottomPanel) {
         setBottomPanel(null);
+      } else if (state.editingMsgId) {
+        cancelInlineUserEdit();
       } else if (!state.renamingChatId) {
         closeDrawer();
       }
@@ -2486,6 +2748,55 @@
     return out;
   }
 
+  const TTS_FORMAT_PRIORITY = ['wav', 'pcm', 'mp3', 'ogg', 'opus', 'aac', 'flac'];
+
+  function normalizeTtsFormatList(rawFormats) {
+    if (!Array.isArray(rawFormats)) return [];
+    const out = [];
+    const seen = new Set();
+    rawFormats.forEach((f) => {
+      let val = '';
+      if (typeof f === 'string') val = f;
+      else if (f && typeof f === 'object') val = f.id || f.format || f.name || '';
+      val = String(val || '').toLowerCase().trim().replace(/^audio\//, '');
+      if (val === 'mpeg') val = 'mp3';
+      if (!val || seen.has(val)) return;
+      seen.add(val);
+      out.push(val);
+    });
+    return out;
+  }
+
+  function resolvePreferredTtsFormat(ttsId) {
+    if (state.ttsFormatOverrides && Object.prototype.hasOwnProperty.call(state.ttsFormatOverrides, ttsId)) {
+      return state.ttsFormatOverrides[ttsId];
+    }
+
+    const advertised = state.ttsFormatsByModel && state.ttsFormatsByModel[ttsId];
+    if (Array.isArray(advertised) && advertised.length > 0) {
+      for (let i = 0; i < TTS_FORMAT_PRIORITY.length; i++) {
+        if (advertised.includes(TTS_FORMAT_PRIORITY[i])) {
+          return TTS_FORMAT_PRIORITY[i];
+        }
+      }
+      return advertised[0];
+    }
+
+    const lower = String(ttsId || '').toLowerCase();
+    // Grok Voice TTS and ElevenLabs on OpenRouter reliably output MP3 (Grok rejects WAV)
+    if (lower.includes('grok') || lower.startsWith('x-ai/')) return 'mp3';
+    if (lower.startsWith('elevenlabs/')) return 'mp3';
+    // Gemini TTS natively supports WAV (zero decode overhead for Pitch/Speed patch)
+    if (lower.startsWith('google/')) return 'wav';
+    return 'mp3';
+  }
+
+  function saveTtsFormatOverride(ttsId, fmt) {
+    if (!ttsId) return;
+    state.ttsFormatOverrides[ttsId] = fmt;
+    idbPut('kv', { key: 'ttsFormatOverrides', value: state.ttsFormatOverrides });
+  }
+
   async function fetchOpenRouterTtsModels() {
     const headers = { Accept: 'application/json' };
     const key = (state.apiKeys.openrouter || '').trim();
@@ -2501,17 +2812,36 @@
       const list = Array.isArray(json && json.data) ? json.data : (Array.isArray(json) ? json : []);
       if (!list.length) return;
 
-      const updated = Object.assign({}, state.ttsVoicesByModel);
+      const updatedVoices = Object.assign({}, state.ttsVoicesByModel);
+      const updatedFormats = Object.assign({}, state.ttsFormatsByModel);
+
       list.forEach((item) => {
         if (!item || !item.id) return;
-        const voices = normalizeVoiceList(item.voices || item.supported_voices || (item.architecture && item.architecture.voices));
+        const voices = normalizeVoiceList(
+          item.voices ||
+          item.supported_voices ||
+          (item.architecture && item.architecture.voices)
+        );
         if (voices.length > 0) {
-          updated[item.id] = voices;
+          updatedVoices[item.id] = voices;
+        }
+        const formats = normalizeTtsFormatList(
+          item.supported_formats ||
+          item.output_formats ||
+          item.response_formats ||
+          item.audio_formats ||
+          item.formats ||
+          (item.architecture && (item.architecture.output_formats || item.architecture.supported_formats))
+        );
+        if (formats.length > 0) {
+          updatedFormats[item.id] = formats;
         }
       });
 
-      state.ttsVoicesByModel = updated;
-      idbPut('kv', { key: 'cachedTtsVoices', value: updated });
+      state.ttsVoicesByModel = updatedVoices;
+      state.ttsFormatsByModel = updatedFormats;
+      idbPut('kv', { key: 'cachedTtsVoices', value: updatedVoices });
+      idbPut('kv', { key: 'cachedTtsFormats', value: updatedFormats });
       ensureValidVoiceForCurrentTts();
       syncAudioPanelUI();
     } catch (_) {}
@@ -2999,21 +3329,72 @@
         headers['X-Title'] = 'OpenRouter PWA';
       }
 
-      // Always generate at speed 1.0 so the cached WAV is pristine original audio
-      resp = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
+      const attemptOrder = [];
+      const primaryFmt = resolvePreferredTtsFormat(ttsId);
+      attemptOrder.push(primaryFmt);
+      ['mp3', 'pcm', 'wav', ''].forEach((cand) => {
+        if (!attemptOrder.includes(cand)) attemptOrder.push(cand);
+      });
+
+      let lastErrDetail = '';
+      let lastErrStatus = 0;
+
+      for (let aIdx = 0; aIdx < attemptOrder.length; aIdx++) {
+        if (signal && signal.aborted) {
+          const abortErr = new Error('Aborted');
+          abortErr.name = 'AbortError';
+          throw abortErr;
+        }
+
+        const chosenFmt = attemptOrder[aIdx];
+        fallbackPcmRate = chosenFmt === 'pcm' ? 24000 : 0;
+
+        // Always generate at speed 1.0 so the cached WAV is pristine original audio
+        const payload = {
           model: ttsId,
           input: chunkText,
           voice: voiceApiId,
-          response_format: 'wav',
           speed: 1.0
-        }),
-        signal
-      });
+        };
+        if (chosenFmt) {
+          payload.response_format = chosenFmt;
+        }
 
-      captureRateLimitHeaders(resp.headers, ttsId);
+        resp = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+          signal
+        });
+
+        captureRateLimitHeaders(resp.headers, ttsId);
+
+        if (resp.ok) {
+          if (aIdx > 0) {
+            saveTtsFormatOverride(ttsId, chosenFmt);
+          }
+          break;
+        }
+
+        lastErrStatus = resp.status;
+        lastErrDetail = await parseResponseErrorText(resp);
+        const lowerErr = String(lastErrDetail || '').toLowerCase();
+        const isFormatRejection =
+          (resp.status === 400 || resp.status === 415 || resp.status === 422) &&
+          (
+            lowerErr.includes('format') ||
+            lowerErr.includes('wav') ||
+            lowerErr.includes('pcm') ||
+            lowerErr.includes('mp3') ||
+            lowerErr.includes('codec') ||
+            lowerErr.includes('mime') ||
+            lowerErr.includes('unsupported')
+          );
+
+        if (!isFormatRejection || aIdx === attemptOrder.length - 1) {
+          throw new Error(`TTS ошибка (${lastErrStatus}): ${lastErrDetail || 'сбой озвучки'}`);
+        }
+      }
     }
 
     if (!resp.ok) {
@@ -3064,6 +3445,12 @@
       try { ctrl.abort(); } catch (_) {}
     }
 
+    if (state.ttsResolveCurrentPlay) {
+      const resolvePrev = state.ttsResolveCurrentPlay;
+      state.ttsResolveCurrentPlay = null;
+      try { resolvePrev(); } catch (_) {}
+    }
+
     ttsAudio.onended = null;
     ttsAudio.onerror = null;
     ttsAudio.onloadedmetadata = null;
@@ -3073,6 +3460,12 @@
     state.ttsCurrentChunk = null;
     state.ttsAppliedPitch = 1.0;
     state.ttsPlayingMsgId = null;
+    state.ttsPaused = false;
+    state.ttsActiveModelId = null;
+    state.ttsActiveVoiceApiId = null;
+    state.ttsPausedTime = 0;
+    state.ttsPausedDuration = 0;
+    state.ttsPitchChangedWhilePaused = false;
     updateTtsIcons();
   }
 
@@ -3085,12 +3478,21 @@
     try { ttsAudio.playbackRate = rate; } catch (_) {}
   }
 
-  function repatchPlayingChunkWithCurrentPitch() {
+  function repatchPlayingChunkWithCurrentPitch(forcePlay = false) {
     if (!state.ttsPlayingMsgId || !state.ttsCurrentChunk || !state.ttsCurrentChunk.isPatchableWav) return;
+    if (state.ttsPaused && !forcePlay) {
+      state.ttsPitchChangedWhilePaused = true;
+      return;
+    }
+
     const sessionId = state.ttsSessionId;
-    const prevTime = Number.isFinite(ttsAudio.currentTime) ? ttsAudio.currentTime : 0;
-    const prevDur = Number.isFinite(ttsAudio.duration) && ttsAudio.duration > 0 ? ttsAudio.duration : 0;
-    const progress = prevDur > 0 ? Math.max(0, Math.min(0.98, prevTime / prevDur)) : 0;
+    const rawTime = Number.isFinite(ttsAudio.currentTime) && ttsAudio.currentTime > 0
+      ? ttsAudio.currentTime
+      : (state.ttsPausedTime || 0);
+    const rawDur = Number.isFinite(ttsAudio.duration) && ttsAudio.duration > 0
+      ? ttsAudio.duration
+      : (state.ttsPausedDuration || 0);
+    const progress = rawDur > 0 ? Math.max(0, Math.min(0.98, rawTime / rawDur)) : 0;
 
     const { blob, appliedPitch, playbackRate } = buildPatchedPlaybackSource(
       state.ttsCurrentChunk,
@@ -3098,6 +3500,7 @@
       state.voiceDraft.pitch
     );
     state.ttsAppliedPitch = appliedPitch;
+    state.ttsPitchChangedWhilePaused = false;
 
     const oldOnEnded = ttsAudio.onended;
     const oldOnError = ttsAudio.onerror;
@@ -3120,6 +3523,49 @@
     try { ttsAudio.playbackRate = playbackRate; } catch (_) {}
     const p = ttsAudio.play();
     if (p && typeof p.catch === 'function') p.catch(() => {});
+  }
+
+  function pauseActivePlayback() {
+    if (!state.ttsPlayingMsgId || state.ttsPaused) return;
+    state.ttsPausedTime = Number.isFinite(ttsAudio.currentTime) ? ttsAudio.currentTime : 0;
+    state.ttsPausedDuration = Number.isFinite(ttsAudio.duration) ? ttsAudio.duration : 0;
+    try { ttsAudio.pause(); } catch (_) {}
+    state.ttsPaused = true;
+    updateTtsIcons();
+  }
+
+  function resumeActivePlaybackIfCompatible() {
+    if (!state.ttsPlayingMsgId || !state.ttsPaused || !state.ttsCurrentChunk) return false;
+
+    const currentVoiceApiId = resolveVoiceApiId(state.ttsId, state.voiceDraft.voice);
+    // Restart from beginning ONLY if model or voice changed (requiring a new TTS request)
+    if (state.ttsActiveModelId !== state.ttsId || state.ttsActiveVoiceApiId !== currentVoiceApiId) {
+      return false;
+    }
+
+    state.ttsPaused = false;
+    updateTtsIcons();
+    setAudioSessionType('playback');
+
+    const desiredPitch = Math.max(0.75, Math.min(1.25, Number(state.voiceDraft.pitch) || 1.0));
+    const pitchDiff = Math.abs(desiredPitch - (state.ttsAppliedPitch || 1.0));
+
+    if (state.ttsCurrentChunk.isPatchableWav && (state.ttsPitchChangedWhilePaused || pitchDiff > 0.006)) {
+      repatchPlayingChunkWithCurrentPitch(true);
+      return true;
+    }
+
+    applyLiveSpeedToPlayingAudio();
+    const p = ttsAudio.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch(() => {
+        // Fallback if iOS released audio buffer during long pause: rebuild Blob at saved time
+        if (state.ttsPlayingMsgId && !state.ttsPaused && state.ttsCurrentChunk) {
+          repatchPlayingChunkWithCurrentPitch(true);
+        }
+      });
+    }
+    return true;
   }
 
   function playCanonicalChunkOnSingleAudio(canonical, sessionId, onPlaybackStarted = null) {
@@ -3153,15 +3599,21 @@
         }
       };
 
+      let cancelHandle = null;
       const finish = (err) => {
         if (settled) return;
         settled = true;
+        if (state.ttsResolveCurrentPlay === cancelHandle) {
+          state.ttsResolveCurrentPlay = null;
+        }
         ttsAudio.onended = null;
         ttsAudio.onerror = null;
         ttsAudio.onloadedmetadata = null;
         if (err) reject(err);
         else resolve('ended');
       };
+      cancelHandle = () => finish(null);
+      state.ttsResolveCurrentPlay = cancelHandle;
 
       const enforceRate = () => {
         if (state.ttsSessionId !== sessionId) return;
@@ -3216,8 +3668,19 @@
     if (state.micState !== 'idle') return;
 
     if (state.ttsPlayingMsgId === msgId) {
-      stopActivePlayback();
-      return;
+      if (!state.ttsPaused) {
+        if (state.ttsCurrentChunk && ttsAudio.src && ttsAudio.src !== SILENT_WAV_URL) {
+          pauseActivePlayback();
+        } else {
+          // Still fetching first chunk before audio began -> cancel cleanly
+          stopActivePlayback();
+        }
+        return;
+      }
+      // Currently paused on the same message: resume unless voice or TTS model changed
+      if (resumeActivePlaybackIfCompatible()) {
+        return;
+      }
     }
 
     stopActivePlayback();
@@ -3241,14 +3704,20 @@
       setAudioSessionType('playback');
     }
 
+    const ttsId = state.ttsId;
+    const voiceApiId = resolveVoiceApiId(ttsId, state.voiceDraft.voice);
+
     const sessionId = ++state.ttsSessionId;
     const controller = new AbortController();
     state.ttsAbortController = controller;
     state.ttsPlayingMsgId = msgId;
+    state.ttsPaused = false;
+    state.ttsActiveModelId = ttsId;
+    state.ttsActiveVoiceApiId = voiceApiId;
+    state.ttsPausedTime = 0;
+    state.ttsPausedDuration = 0;
+    state.ttsPitchChangedWhilePaused = false;
     updateTtsIcons();
-
-    const ttsId = state.ttsId;
-    const voiceApiId = resolveVoiceApiId(ttsId, state.voiceDraft.voice);
 
     try {
       // Hold at most 1 lookahead chunk (i + 1) buffered ahead of currently playing chunk i.
@@ -3297,17 +3766,30 @@
         state.ttsAppliedPitch = 1.0;
         revokeActiveTtsBlobUrl();
         state.ttsPlayingMsgId = null;
+        state.ttsPaused = false;
+        state.ttsActiveModelId = null;
+        state.ttsActiveVoiceApiId = null;
+        state.ttsPausedTime = 0;
+        state.ttsPausedDuration = 0;
+        state.ttsPitchChangedWhilePaused = false;
         updateTtsIcons();
       }
     }
   }
 
+  function applyTtsButtonState(btn, msgId) {
+    const isTarget = msgId === state.ttsPlayingMsgId;
+    const isPlaying = isTarget && !state.ttsPaused;
+    const isPaused = isTarget && state.ttsPaused;
+    btn.innerHTML = isPlaying ? ICONS.pauseAudio : ICONS.speaker;
+    btn.classList.toggle('speaking', isPlaying);
+    btn.classList.toggle('active', isPaused);
+    btn.setAttribute('aria-label', isPlaying ? 'Пауза' : (isPaused ? 'Продолжить озвучку' : 'Озвучить'));
+  }
+
   function updateTtsIcons() {
     document.querySelectorAll('[data-tts-btn]').forEach((btn) => {
-      const isPlaying = btn.dataset.ttsBtn === state.ttsPlayingMsgId;
-      btn.innerHTML = isPlaying ? ICONS.stopAudio : ICONS.speaker;
-      btn.classList.toggle('speaking', isPlaying);
-      btn.setAttribute('aria-label', isPlaying ? 'Остановить озвучку' : 'Озвучить');
+      applyTtsButtonState(btn, btn.dataset.ttsBtn);
     });
   }
 
@@ -3619,21 +4101,114 @@
       block.dataset.msgId = msg.id;
 
       if (msg.role === 'user') {
+        const isEditingThis = state.editingMsgId === msg.id;
         const card = document.createElement('div');
-        card.className = `msg-user-card${msg.collapsed ? ' collapsed' : ''}`;
+        card.className = `msg-user-card${!isEditingThis && msg.collapsed ? ' collapsed' : ''}`;
 
-        const textEl = document.createElement('div');
-        textEl.className = `msg-body${msg.collapsed ? ' clamped' : ''}`;
-        textEl.textContent = msg.text;
-        card.appendChild(textEl);
+        if (isEditingThis) {
+          card.style.width = '100%';
+          card.style.maxWidth = '100%';
 
-        if (msg.collapsed) {
-          card.addEventListener('click', () => {
-            if (state.micState !== 'idle') return;
-            msg.collapsed = false;
-            persistChat(chat);
-            renderFeed();
+          const editTa = document.createElement('textarea');
+          editTa.value = state.editingMsgDraft;
+          editTa.rows = 2;
+          editTa.setAttribute('aria-label', 'Редактировать сообщение');
+          editTa.style.cssText = [
+            'width:100%',
+            'min-height:64px',
+            'max-height:220px',
+            'padding:9px 11px',
+            'border-radius:12px',
+            'background-color:var(--menu-dark)',
+            'color:var(--text-input)',
+            'caret-color:var(--text-input)',
+            'font-family:var(--font-sans)',
+            'font-size:16px',
+            'line-height:1.45',
+            'resize:none',
+            'overflow-y:auto',
+            '-webkit-overflow-scrolling:touch',
+            'display:block'
+          ].join(';');
+
+          const autoGrowEditTa = () => {
+            editTa.style.height = 'auto';
+            editTa.style.height = `${Math.max(64, Math.min(editTa.scrollHeight, 220))}px`;
+          };
+
+          editTa.addEventListener('input', () => {
+            state.editingMsgDraft = editTa.value;
+            autoGrowEditTa();
           });
+
+          editTa.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              cancelInlineUserEdit();
+            } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              submitInlineUserEdit(msg.id);
+            }
+          });
+
+          const btnBar = document.createElement('div');
+          btnBar.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:9px;';
+
+          const cancelBtn = document.createElement('button');
+          cancelBtn.type = 'button';
+          cancelBtn.textContent = 'Отмена';
+          cancelBtn.style.cssText = [
+            'height:34px',
+            'padding:0 13px',
+            'border-radius:9999px',
+            'background-color:var(--surface-composer)',
+            'color:var(--menu-text)',
+            'font-size:13px',
+            'font-weight:500'
+          ].join(';');
+          cancelBtn.addEventListener('click', () => cancelInlineUserEdit());
+
+          const submitBtn = document.createElement('button');
+          submitBtn.type = 'button';
+          submitBtn.textContent = 'Отправить';
+          submitBtn.style.cssText = [
+            'height:34px',
+            'padding:0 14px',
+            'border-radius:9999px',
+            'background-color:var(--save-bg)',
+            'color:var(--save-fg)',
+            'font-size:13px',
+            'font-weight:500'
+          ].join(';');
+          submitBtn.addEventListener('click', () => submitInlineUserEdit(msg.id));
+
+          btnBar.appendChild(cancelBtn);
+          btnBar.appendChild(submitBtn);
+          card.appendChild(editTa);
+          card.appendChild(btnBar);
+
+          requestAnimationFrame(() => {
+            if (!editTa.isConnected) return;
+            autoGrowEditTa();
+            editTa.focus();
+            try { editTa.setSelectionRange(editTa.value.length, editTa.value.length); } catch (_) {}
+            try { card.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) {}
+          });
+        } else {
+          const textEl = document.createElement('div');
+          textEl.className = `msg-body${msg.collapsed ? ' clamped' : ''}`;
+          textEl.textContent = msg.text;
+          card.appendChild(textEl);
+
+          if (msg.collapsed) {
+            card.addEventListener('click', () => {
+              if (state.micState !== 'idle') return;
+              msg.collapsed = false;
+              persistChat(chat);
+              renderFeed();
+            });
+          }
         }
 
         block.appendChild(card);
@@ -3723,10 +4298,7 @@
       const ttsBtn = document.createElement('button');
       ttsBtn.className = 'msg-icon-btn';
       ttsBtn.dataset.ttsBtn = msg.id;
-      const isPlaying = state.ttsPlayingMsgId === msg.id;
-      ttsBtn.innerHTML = isPlaying ? ICONS.stopAudio : ICONS.speaker;
-      if (isPlaying) ttsBtn.classList.add('speaking');
-      ttsBtn.setAttribute('aria-label', isPlaying ? 'Остановить озвучку' : 'Озвучить');
+      applyTtsButtonState(ttsBtn, msg.id);
       ttsBtn.addEventListener('click', () => togglePlayback(msg.id));
 
       const infoBtn = document.createElement('button');
@@ -3749,6 +4321,36 @@
         persistChat(chat);
         renderFeed();
       });
+
+      if (msg.role === 'user') {
+        const editBtn = document.createElement('button');
+        editBtn.className = `msg-icon-btn${state.editingMsgId === msg.id ? ' active' : ''}`;
+        editBtn.setAttribute('aria-label', 'Редактировать сообщение');
+        editBtn.innerHTML = ICONS.editPencil;
+        editBtn.addEventListener('click', () => {
+          if (state.micState !== 'idle') return;
+          if (state.editingMsgId === msg.id) {
+            cancelInlineUserEdit();
+          } else {
+            startInlineUserEdit(msg.id);
+          }
+        });
+        actions.appendChild(editBtn);
+      }
+
+      const retryBtn = document.createElement('button');
+      retryBtn.className = 'msg-icon-btn';
+      retryBtn.setAttribute('aria-label', 'Повторить запрос');
+      retryBtn.innerHTML = ICONS.retry;
+      retryBtn.addEventListener('click', () => {
+        if (state.micState !== 'idle') return;
+        if (msg.role === 'user') {
+          retryFromUserMessage(msg.id);
+        } else {
+          retryAssistantMessage(msg.id);
+        }
+      });
+      actions.appendChild(retryBtn);
 
       actions.appendChild(copyBtn);
       actions.appendChild(delBtn);
@@ -3809,7 +4411,8 @@
       syncAudioPanelUI();
       applyLiveSpeedToPlayingAudio();
       if (state.ttsPlayingMsgId && state.ttsCurrentChunk) {
-        repatchPlayingChunkWithCurrentPitch();
+        if (state.ttsPaused) state.ttsPitchChangedWhilePaused = true;
+        else repatchPlayingChunkWithCurrentPitch();
       }
       persistSettings();
     });
@@ -3825,6 +4428,10 @@
     state.voiceDraft.pitch = parseFloat(pitchSlider.value);
     syncAudioPanelUI();
     if (state.ttsPlayingMsgId && state.ttsCurrentChunk) {
+      if (state.ttsPaused) {
+        state.ttsPitchChangedWhilePaused = true;
+        return;
+      }
       clearTimeout(state.ttsPitchRepatchTimer);
       state.ttsPitchRepatchTimer = setTimeout(() => {
         repatchPlayingChunkWithCurrentPitch();
@@ -3835,6 +4442,10 @@
   pitchSlider.addEventListener('change', () => {
     clearTimeout(state.ttsPitchRepatchTimer);
     if (state.ttsPlayingMsgId && state.ttsCurrentChunk) {
+      if (state.ttsPaused) {
+        state.ttsPitchChangedWhilePaused = true;
+        return;
+      }
       repatchPlayingChunkWithCurrentPitch();
     }
   });
@@ -4382,6 +4993,60 @@
     return out;
   }
 
+  function learnFromReasoningApiError(modelObj, sentThinking, rawDetail) {
+    if (!modelObj || !modelObj.id || !rawDetail) return null;
+    const lower = String(rawDetail).toLowerCase();
+
+    const isMandatoryErr =
+      (lower.includes('reasoning') && (lower.includes('mandatory') || lower.includes('cannot be disabled') || lower.includes('required'))) ||
+      (lower.includes('thinking') && (lower.includes('mandatory') || lower.includes('cannot be disabled')));
+
+    if (isMandatoryErr) {
+      const curLevels = Array.isArray(modelObj.thinkingLevels) ? modelObj.thinkingLevels.slice() : ['minimal', 'low', 'medium', 'high'];
+      let nextLevels = curLevels.filter((l) => l !== 'none');
+      if (sentThinking === 'minimal') {
+        nextLevels = nextLevels.filter((l) => l !== 'minimal');
+      }
+      if (nextLevels.length === 0) nextLevels = ['low', 'medium', 'high'];
+      saveModelCapsOverride(modelObj.id, { supportsReasoning: true, thinkingLevels: nextLevels });
+      const newObj = ALL_THINKING_LEVELS.find((t) => t.id === state.thinking) || { label: state.thinking };
+      return `Для модели ${modelObj.label} Thinking обязателен — недоступная опция скрыта из списка, уровень переключён на ${newObj.label}. Повторите запрос.\n(${rawDetail})`;
+    }
+
+    const isUnsupportedReasoningErr =
+      (lower.includes('reasoning') && (lower.includes('not supported') || lower.includes('does not support') || lower.includes('unsupported'))) &&
+      !lower.includes('effort');
+
+    if (isUnsupportedReasoningErr) {
+      saveModelCapsOverride(modelObj.id, { supportsReasoning: false, thinkingLevels: ['none'] });
+      return `Модель ${modelObj.label} не поддерживает Thinking — опция отключена автоматически. Повторите запрос.\n(${rawDetail})`;
+    }
+
+    const isEffortErr =
+      (lower.includes('reasoning') || lower.includes('effort') || lower.includes('thinking')) &&
+      (lower.includes('invalid') || lower.includes('unsupported') || lower.includes('not supported') || lower.includes('must be') || lower.includes('allowed') || lower.includes('expected'));
+
+    if (isEffortErr && sentThinking) {
+      // Try extracting explicit allowed effort names if error lists them
+      let nextLevels = [];
+      const enumTailMatch = lower.match(/(?:expected|one of|allowed|supported|valid)[^.\n]*/);
+      if (enumTailMatch) {
+        const segment = enumTailMatch[0];
+        nextLevels = VALID_EFFORT_ORDER.filter((lvl) => new RegExp(`\\b${lvl}\\b`).test(segment));
+      }
+      if (nextLevels.length === 0) {
+        const curLevels = Array.isArray(modelObj.thinkingLevels) ? modelObj.thinkingLevels.slice() : ['low', 'medium', 'high'];
+        nextLevels = curLevels.filter((l) => l !== sentThinking);
+      }
+      if (nextLevels.length === 0) nextLevels = ['low', 'medium', 'high'];
+      saveModelCapsOverride(modelObj.id, { supportsReasoning: true, thinkingLevels: nextLevels });
+      const newObj = ALL_THINKING_LEVELS.find((t) => t.id === state.thinking) || { label: state.thinking };
+      return `Уровень Thinking «${sentThinking}» недоступен для модели ${modelObj.label} — опция скрыта, переключено на ${newObj.label}. Повторите запрос.\n(${rawDetail})`;
+    }
+
+    return null;
+  }
+
   function formatApiErrorForChat(status, rawDetail, usingFlex, modelLabel) {
     const detail = String(rawDetail || '').trim();
     const lower = detail.toLowerCase();
@@ -4450,6 +5115,129 @@
     }
   }
 
+  function startInlineUserEdit(msgId) {
+    if (state.micState !== 'idle') return;
+    const chat = getActiveChat();
+    if (!chat) return;
+    const msg = chat.messages.find((m) => m.id === msgId && m.role === 'user');
+    if (!msg) return;
+    closePopover();
+    setBottomPanel(null);
+    msg.collapsed = false;
+    state.editingMsgId = msg.id;
+    state.editingMsgDraft = msg.text || '';
+    renderFeed();
+  }
+
+  function cancelInlineUserEdit() {
+    if (!state.editingMsgId) return;
+    state.editingMsgId = null;
+    state.editingMsgDraft = '';
+    renderFeed();
+  }
+
+  async function submitInlineUserEdit(msgId) {
+    if (state.micState !== 'idle') return;
+    const chat = getActiveChat();
+    if (!chat) return;
+    const idx = chat.messages.findIndex((m) => m.id === msgId && m.role === 'user');
+    if (idx === -1) {
+      cancelInlineUserEdit();
+      return;
+    }
+
+    const newText = String(state.editingMsgDraft || '').trim();
+    if (!newText) {
+      showToast('Сообщение не может быть пустым');
+      return;
+    }
+
+    if (state.autoTts) {
+      unlockAudioSyncInUserGesture(true);
+    }
+
+    closePopover();
+    setBottomPanel(null);
+    stopActivePlayback();
+    abortGeneration(false, true);
+
+    const now = new Date();
+    const targetMsg = chat.messages[idx];
+    targetMsg.text = newText;
+    targetMsg.timestamp = formatCompactTimestamp(now);
+    targetMsg.collapsed = false;
+
+    if (idx === 0) {
+      chat.title = newText.slice(0, 32) + (newText.length > 32 ? '…' : '');
+    }
+    chat.date = `Сегодня · ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    chat.messages = chat.messages.slice(0, idx + 1);
+
+    state.editingMsgId = null;
+    state.editingMsgDraft = '';
+    persistChat(chat);
+
+    await runAssistantCompletion(chat);
+  }
+
+  async function retryFromUserMessage(msgId) {
+    if (state.micState !== 'idle') return;
+    const chat = getActiveChat();
+    if (!chat) return;
+    const idx = chat.messages.findIndex((m) => m.id === msgId && m.role === 'user');
+    if (idx === -1) return;
+
+    if (state.autoTts) {
+      unlockAudioSyncInUserGesture(true);
+    }
+
+    closePopover();
+    setBottomPanel(null);
+    state.editingMsgId = null;
+    state.editingMsgDraft = '';
+    stopActivePlayback();
+    abortGeneration(false, true);
+
+    const now = new Date();
+    chat.date = `Сегодня · ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    chat.messages = chat.messages.slice(0, idx + 1);
+    persistChat(chat);
+
+    await runAssistantCompletion(chat);
+  }
+
+  async function retryAssistantMessage(msgId) {
+    if (state.micState !== 'idle') return;
+    const chat = getActiveChat();
+    if (!chat) return;
+    const idx = chat.messages.findIndex((m) => m.id === msgId && m.role === 'assistant');
+    if (idx === -1) return;
+
+    const hasUserBefore = chat.messages.slice(0, idx).some((m) => m && m.role === 'user' && (m.text || '').trim());
+    if (!hasUserBefore) {
+      showToast('Нет исходного сообщения пользователя');
+      return;
+    }
+
+    if (state.autoTts) {
+      unlockAudioSyncInUserGesture(true);
+    }
+
+    closePopover();
+    setBottomPanel(null);
+    state.editingMsgId = null;
+    state.editingMsgDraft = '';
+    stopActivePlayback();
+    abortGeneration(false, true);
+
+    const now = new Date();
+    chat.date = `Сегодня · ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    chat.messages = chat.messages.slice(0, idx);
+    persistChat(chat);
+
+    await runAssistantCompletion(chat);
+  }
+
   async function handleSendOrStop() {
     if (state.micState !== 'idle') return;
     if (state.generatingMsgId) {
@@ -4467,6 +5255,8 @@
 
     setBottomPanel(null);
     closePopover();
+    state.editingMsgId = null;
+    state.editingMsgDraft = '';
 
     let chat = getActiveChat();
     if (!chat) {
@@ -4495,10 +5285,16 @@
     chatInput.value = '';
     updateComposerLayout();
 
+    await runAssistantCompletion(chat);
+  }
+
+  async function runAssistantCompletion(chat) {
+    if (!chat) return;
     const curModel = getCurrentModelObj();
     const capturedModelId = curModel ? curModel.id : state.modelId;
     const capturedModelLabel = curModel ? curModel.label : state.modelLabel;
     const availableLevels = getAvailableThinkingLevels(curModel);
+    const capturedThinking = state.thinking;
     const usingFlex = state.provider === 'openrouter' && Boolean(curModel && curModel.supportsFlex) && Boolean(state.flexEnabled);
 
     const aiId = 'a-' + (Date.now() + 1);
@@ -4580,7 +5376,10 @@
       if (!resp.ok) {
         const detail = await parseResponseErrorText(resp);
         if (state.generatingMsgId !== aiId) return;
-        setAssistantError(chat, aiMsg, formatApiErrorForChat(resp.status, detail, usingFlex, capturedModelLabel));
+        const learnedMsg = (resp.status === 400 || resp.status === 422)
+          ? learnFromReasoningApiError(curModel, capturedThinking, detail)
+          : null;
+        setAssistantError(chat, aiMsg, learnedMsg || formatApiErrorForChat(resp.status, detail, usingFlex, capturedModelLabel));
         return;
       }
 
@@ -4859,6 +5658,8 @@
     closePopover();
     closeContextMenu();
     setBottomPanel(null);
+    state.editingMsgId = null;
+    state.editingMsgDraft = '';
     stopActivePlayback();
     abortGeneration(false, true);
     const existingEmpty = state.chats.find((c) => c.messages.length === 0);
@@ -5331,6 +6132,8 @@
             return;
           }
           if (state.contextMenuChatId || state.micState !== 'idle') return;
+          state.editingMsgId = null;
+          state.editingMsgDraft = '';
           stopActivePlayback();
           abortGeneration(false, true);
           state.activeChatId = chat.id;
@@ -5387,10 +6190,26 @@
      ASYNC INITIALIZATION (HYDRATE INDEXEDDB -> RENDER -> FETCH MODELS)
      ========================================================================= */
   async function hydrateFromIndexedDB() {
-    // 1. Load cached Gemini models & TTS voice catalogs first (fast boot)
+    // 1. Load per-model capability overrides & cached Gemini models (fast boot)
+    const capsOvRec = await idbGet('kv', 'modelCapsOverrides');
+    if (capsOvRec && capsOvRec.value && typeof capsOvRec.value === 'object') {
+      state.modelCapsOverrides = capsOvRec.value;
+    }
     const cachedModelsRec = await idbGet('kv', 'cachedGeminiModels');
     if (cachedModelsRec && cachedModelsRec.value && Array.isArray(cachedModelsRec.value.models) && cachedModelsRec.value.models.length > 0) {
-      const filteredCached = cachedModelsRec.value.models.filter((m) => !isBatchModelMeta(m));
+      const filteredCached = cachedModelsRec.value.models
+        .filter((m) => !isBatchModelMeta(m))
+        .map((m) => {
+          // Re-derive baseline thinking levels so improved rules apply immediately to cached models
+          const derived = deriveThinkingLevels({
+            id: m.id,
+            name: m.fullName || m.label,
+            supported_parameters: m.supportsReasoning ? ['reasoning'] : ['temperature']
+          });
+          m.supportsReasoning = derived.supportsReasoning;
+          m.thinkingLevels = derived.thinkingLevels;
+          return applyModelCapsOverride(m);
+        });
       if (filteredCached.length > 0) {
         state.chatModels = filteredCached;
       }
@@ -5398,6 +6217,14 @@
     const cachedTtsVoicesRec = await idbGet('kv', 'cachedTtsVoices');
     if (cachedTtsVoicesRec && cachedTtsVoicesRec.value && typeof cachedTtsVoicesRec.value === 'object') {
       state.ttsVoicesByModel = cachedTtsVoicesRec.value;
+    }
+    const cachedTtsFormatsRec = await idbGet('kv', 'cachedTtsFormats');
+    if (cachedTtsFormatsRec && cachedTtsFormatsRec.value && typeof cachedTtsFormatsRec.value === 'object') {
+      state.ttsFormatsByModel = cachedTtsFormatsRec.value;
+    }
+    const ttsFmtOvRec = await idbGet('kv', 'ttsFormatOverrides');
+    if (ttsFmtOvRec && ttsFmtOvRec.value && typeof ttsFmtOvRec.value === 'object') {
+      state.ttsFormatOverrides = ttsFmtOvRec.value;
     }
     const cachedElevenRec = await idbGet('kv', 'cachedElevenVoices');
     if (cachedElevenRec && Array.isArray(cachedElevenRec.value) && cachedElevenRec.value.length > 0) {
@@ -5531,6 +6358,7 @@
     syncDrawerSettingsUI();
     syncSendButton();
     updateComposerLayout();
+    syncViewport();
     syncFloatingPanelsPosition();
     renderFeed();
     renderChatList();
