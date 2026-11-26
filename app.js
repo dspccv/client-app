@@ -2,7 +2,7 @@
   'use strict';
 
   /* =========================================================================
-     CONSTANTS & CATALOGS (STEP 2: OPENROUTER CHAT SSE + MARKDOWN + FLEX)
+     CONSTANTS & CATALOGS (STEP 3: REAL-TIME BALANCE, 24H STATS & FREE QUOTAS)
      ========================================================================= */
   const DB_NAME = 'OpenRouterPWA_DB';
   const DB_VERSION = 1;
@@ -588,6 +588,25 @@
 
     usageLog: [],
     rateLimitInfo: null,
+    modelRateLimits: {},
+
+    creditsInfo: {
+      totalCredits: null,
+      totalUsage: null,
+      remaining: null,
+      updatedAt: 0
+    },
+    keyInfo: {
+      limit: null,
+      limitRemaining: null,
+      usageDaily: null,
+      usageTotal: null,
+      isFreeTier: null,
+      updatedAt: 0
+    },
+    balanceLoading: false,
+    balanceError: '',
+    statsTickTimer: null,
 
     openPopover: null,
     openInfoMsgId: null,
@@ -694,20 +713,221 @@
     idbPut('kv', { key: 'usageLog', value: state.usageLog });
   }
 
-  function captureRateLimitHeaders(headers) {
+  function normalizeResetTimestampMs(rawReset) {
+    if (rawReset === null || rawReset === undefined || rawReset === '') return null;
+    const n = Number(rawReset);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    // OpenRouter may send epoch seconds (< 1e12) or epoch milliseconds (>= 1e12)
+    return n < 1e12 ? Math.round(n * 1000) : Math.round(n);
+  }
+
+  function captureRateLimitHeaders(headers, modelId = null) {
     if (!headers || !headers.get) return;
     const limit = headers.get('x-ratelimit-limit');
     const remaining = headers.get('x-ratelimit-remaining');
     const reset = headers.get('x-ratelimit-reset');
-    if (limit || remaining || reset) {
-      state.rateLimitInfo = {
-        limit: limit !== null ? Number(limit) : null,
-        remaining: remaining !== null ? Number(remaining) : null,
-        reset: reset !== null ? Number(reset) : null,
+    if (limit !== null || remaining !== null || reset !== null) {
+      const info = {
+        limit: limit !== null && limit !== '' && Number.isFinite(Number(limit)) ? Number(limit) : null,
+        remaining: remaining !== null && remaining !== '' && Number.isFinite(Number(remaining)) ? Number(remaining) : null,
+        resetMs: normalizeResetTimestampMs(reset),
         updatedAt: Date.now()
       };
+      state.rateLimitInfo = info;
       idbPut('kv', { key: 'rateLimitInfo', value: state.rateLimitInfo });
+
+      if (modelId) {
+        state.modelRateLimits[modelId] = info;
+        idbPut('kv', { key: 'modelRateLimits', value: state.modelRateLimits });
+      }
     }
+  }
+
+  /* =========================================================================
+     OPENROUTER REAL-TIME BALANCE (/credits & /key) & 24H STATS ENGINE
+     ========================================================================= */
+  let balanceFollowupTimer = null;
+
+  function formatUsd3(val) {
+    const num = Number(val);
+    if (!Number.isFinite(num)) return '0.000';
+    return Math.max(0, num).toFixed(3);
+  }
+
+  function formatCompactInt(n) {
+    const num = Math.round(Number(n) || 0);
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  }
+
+  function getAccountDisplayBalance() {
+    if (typeof state.creditsInfo.remaining === 'number' && Number.isFinite(state.creditsInfo.remaining)) {
+      return state.creditsInfo.remaining;
+    }
+    if (typeof state.keyInfo.limitRemaining === 'number' && Number.isFinite(state.keyInfo.limitRemaining)) {
+      return state.keyInfo.limitRemaining;
+    }
+    return null;
+  }
+
+  function syncBalanceButtonUI() {
+    if (!balanceBtnVal) return;
+    const bal = getAccountDisplayBalance();
+    const text = bal !== null ? `${formatUsd3(bal)}$` : '0.000$';
+    balanceBtnVal.textContent = text;
+    balanceBtnVal.dataset.label = text;
+  }
+
+  function getDailyFreeQuotaLimit() {
+    if (
+      state.rateLimitInfo &&
+      typeof state.rateLimitInfo.limit === 'number' &&
+      state.rateLimitInfo.limit > 0 &&
+      (Date.now() - (state.rateLimitInfo.updatedAt || 0)) < 24 * 60 * 60 * 1000
+    ) {
+      return state.rateLimitInfo.limit;
+    }
+    if (typeof state.creditsInfo.totalCredits === 'number' && state.creditsInfo.totalCredits >= 10) {
+      return 1000;
+    }
+    if (state.keyInfo.isFreeTier === false) {
+      return 1000;
+    }
+    return 50;
+  }
+
+  function getNextUtcMidnightMs() {
+    const now = new Date();
+    return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0);
+  }
+
+  function getResetCountdownHHMM(customResetMs = null) {
+    const now = Date.now();
+    let targetMs = null;
+
+    if (typeof customResetMs === 'number' && customResetMs > now + 1000) {
+      targetMs = customResetMs;
+    } else if (
+      state.rateLimitInfo &&
+      typeof state.rateLimitInfo.resetMs === 'number' &&
+      state.rateLimitInfo.resetMs > now + 1000
+    ) {
+      targetMs = state.rateLimitInfo.resetMs;
+    } else {
+      targetMs = getNextUtcMidnightMs();
+    }
+
+    const diffMs = Math.max(0, targetMs - now);
+    const totalMinutes = Math.ceil(diffMs / 60000);
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+  }
+
+  async function fetchOpenRouterBalance(showFeedback = false) {
+    const key = (state.apiKeys.openrouter || '').trim();
+    if (!key) {
+      state.creditsInfo = { totalCredits: null, totalUsage: null, remaining: null, updatedAt: 0 };
+      state.keyInfo = { limit: null, limitRemaining: null, usageDaily: null, usageTotal: null, isFreeTier: null, updatedAt: 0 };
+      state.balanceError = '';
+      syncBalanceButtonUI();
+      if (state.activeBottomPanel === 'stats') renderStatsPanelContent();
+      return;
+    }
+
+    if (state.balanceLoading) return;
+    state.balanceLoading = true;
+    state.balanceError = '';
+
+    if (state.activeBottomPanel === 'stats') {
+      renderStatsPanelContent();
+    }
+
+    const headers = {
+      Accept: 'application/json',
+      Authorization: `Bearer ${key}`
+    };
+
+    try {
+      const [creditsRes, keyRes] = await Promise.allSettled([
+        fetch(`${OPENROUTER_API_BASE}/credits`, { method: 'GET', headers }),
+        fetch(`${OPENROUTER_API_BASE}/key`, { method: 'GET', headers })
+      ]);
+
+      let gotAnyData = false;
+
+      if (creditsRes.status === 'fulfilled' && creditsRes.value && creditsRes.value.ok) {
+        const json = await creditsRes.value.json();
+        const d = (json && json.data) || {};
+        const totalCredits = Number(d.total_credits);
+        const totalUsage = Number(d.total_usage);
+        if (Number.isFinite(totalCredits) && Number.isFinite(totalUsage)) {
+          state.creditsInfo = {
+            totalCredits,
+            totalUsage,
+            remaining: Math.max(0, totalCredits - totalUsage),
+            updatedAt: Date.now()
+          };
+          idbPut('kv', { key: 'creditsInfo', value: state.creditsInfo });
+          gotAnyData = true;
+        }
+      }
+
+      if (keyRes.status === 'fulfilled' && keyRes.value && keyRes.value.ok) {
+        const json = await keyRes.value.json();
+        const d = (json && json.data) || {};
+        const limit = d.limit !== null && d.limit !== undefined && Number.isFinite(Number(d.limit)) ? Number(d.limit) : null;
+        const limitRemaining = d.limit_remaining !== null && d.limit_remaining !== undefined && Number.isFinite(Number(d.limit_remaining))
+          ? Math.max(0, Number(d.limit_remaining))
+          : null;
+        const usageDaily = d.usage_daily !== null && d.usage_daily !== undefined && Number.isFinite(Number(d.usage_daily))
+          ? Math.max(0, Number(d.usage_daily))
+          : null;
+        const usageTotal = d.usage !== null && d.usage !== undefined && Number.isFinite(Number(d.usage))
+          ? Math.max(0, Number(d.usage))
+          : null;
+
+        state.keyInfo = {
+          limit,
+          limitRemaining,
+          usageDaily,
+          usageTotal,
+          isFreeTier: typeof d.is_free_tier === 'boolean' ? d.is_free_tier : null,
+          updatedAt: Date.now()
+        };
+        idbPut('kv', { key: 'keyInfo', value: state.keyInfo });
+        gotAnyData = true;
+      }
+
+      if (!gotAnyData) {
+        const creditsStatus = creditsRes.status === 'fulfilled' && creditsRes.value ? creditsRes.value.status : 0;
+        const keyStatus = keyRes.status === 'fulfilled' && keyRes.value ? keyRes.value.status : 0;
+        const status = creditsStatus || keyStatus;
+        state.balanceError = status === 401 ? 'Неверный API ключ' : `Ошибка баланса${status ? ` (${status})` : ''}`;
+        if (showFeedback) showToast(state.balanceError);
+      } else if (showFeedback) {
+        const bal = getAccountDisplayBalance();
+        showToast(bal !== null ? `Баланс: $${formatUsd3(bal)}` : 'Баланс обновлён');
+      }
+    } catch (err) {
+      state.balanceError = 'Ошибка сети при загрузке баланса';
+      if (showFeedback) showToast(state.balanceError);
+    } finally {
+      state.balanceLoading = false;
+      syncBalanceButtonUI();
+      if (state.activeBottomPanel === 'stats') {
+        renderStatsPanelContent();
+      }
+    }
+  }
+
+  function scheduleBalanceRefreshAfterRequest() {
+    if (state.provider !== 'openrouter' || !(state.apiKeys.openrouter || '').trim()) return;
+    fetchOpenRouterBalance(false);
+    clearTimeout(balanceFollowupTimer);
+    balanceFollowupTimer = setTimeout(() => {
+      balanceFollowupTimer = null;
+      fetchOpenRouterBalance(false);
+    }, 1800);
   }
 
 
@@ -1033,6 +1253,7 @@
   const thinkingBtnLabel = document.getElementById('thinkingBtnLabel');
 
   const statsDropdownBtn = document.getElementById('statsDropdownBtn');
+  const balanceBtnVal = document.getElementById('balanceBtnVal');
   const personaDockBtn = document.getElementById('personaDockBtn');
   const personaDockLabel = document.getElementById('personaDockLabel');
   const audioDockBtn = document.getElementById('audioDockBtn');
@@ -1399,51 +1620,228 @@
   /* =========================================================================
      4. DECOUPLED BOTTOM OVERLAY PANELS — SINGLE-PASS ZERO FLICKER
      ========================================================================= */
+  function aggregateUsage24h() {
+    pruneUsageLog24h();
+    const byKey = Object.create(null);
+    let totalCost24h = 0;
+    let totalFreeReqs24h = 0;
+
+    (state.usageLog || []).forEach((e) => {
+      if (!e || !e.modelId) return;
+      const type = e.type || 'chat';
+      const k = `${type}:${e.modelId}`;
+      if (!byKey[k]) {
+        byKey[k] = {
+          type,
+          modelId: e.modelId,
+          modelLabel: e.modelLabel || e.modelId,
+          requests: 0,
+          tokens: 0,
+          chars: 0,
+          seconds: 0,
+          cost: 0,
+          isFree: Boolean(e.isFree || String(e.modelId).endsWith(':free'))
+        };
+      }
+      const bucket = byKey[k];
+      bucket.requests += 1;
+      bucket.tokens += Number(e.tokens) || 0;
+      bucket.chars += Number(e.chars) || 0;
+      bucket.seconds += Number(e.seconds) || 0;
+      bucket.cost += Number(e.cost) || 0;
+      totalCost24h += Number(e.cost) || 0;
+      if (bucket.isFree) totalFreeReqs24h += 1;
+    });
+
+    return { byKey, totalCost24h, totalFreeReqs24h };
+  }
+
   function renderStatsPanelContent() {
-    const ttsName = (TTS_MODELS.find((t) => t.id === state.ttsId) || TTS_MODELS[0]).name;
-    const sttName = (STT_MODELS.find((s) => s.id === state.sttId) || STT_MODELS[0]).name;
+    const { byKey, totalCost24h, totalFreeReqs24h } = aggregateUsage24h();
+    const hasOrKey = Boolean((state.apiKeys.openrouter || '').trim());
+    const accBal = getAccountDisplayBalance();
+    const freeLimit = getDailyFreeQuotaLimit();
+    const globalRst = getResetCountdownHHMM();
+
+    // Key spend limit sub-line (only if limited key like $4)
+    let keyLimitSubHtml = '';
+    if (state.keyInfo.limit !== null && state.keyInfo.limitRemaining !== null) {
+      keyLimitSubHtml = `<div class="stats-balance-lbl" style="margin-top:2px;">Лимит ключа: $${formatUsd3(state.keyInfo.limitRemaining)} / $${formatUsd3(state.keyInfo.limit)}</div>`;
+    } else if (!hasOrKey) {
+      keyLimitSubHtml = '<div class="stats-balance-lbl" style="margin-top:2px;">Вставьте OpenRouter Key</div>';
+    } else if (state.balanceError) {
+      keyLimitSubHtml = `<div class="stats-balance-lbl" style="margin-top:2px;color:#f2b8bc;">${escapeHtml(state.balanceError)}</div>`;
+    }
+
+    // 24h spend: prefer real local sum; if OpenRouter reports higher daily usage on the key, show it as subtle hint
+    const dailySpendText = `$${formatUsd3(totalCost24h)}`;
+    const apiDailyHint =
+      typeof state.keyInfo.usageDaily === 'number' && state.keyInfo.usageDaily > totalCost24h + 0.0005
+        ? `<div class="stats-balance-lbl" style="font-size:11px;">API день: $${formatUsd3(state.keyInfo.usageDaily)}</div>`
+        : '';
+
+    // Build full list of ALL models in selectors (Chat Gemini, TTS, STT)
+    const chatRows = [];
+    const seenChatIds = new Set();
+    (state.chatModels || []).forEach((m) => {
+      seenChatIds.add(m.id);
+      const u = byKey[`chat:${m.id}`] || { requests: 0, tokens: 0, cost: 0, isFree: Boolean(m.isFree) };
+      chatRows.push({
+        id: m.id,
+        label: m.label,
+        isFree: Boolean(m.isFree || m.id.endsWith(':free')),
+        requests: u.requests,
+        tokens: u.tokens,
+        cost: u.cost
+      });
+    });
+    // Include any chat model used in last 24h that isn't currently in chatModels
+    Object.values(byKey).forEach((u) => {
+      if (u.type === 'chat' && !seenChatIds.has(u.modelId)) {
+        chatRows.push({
+          id: u.modelId,
+          label: u.modelLabel || u.modelId,
+          isFree: u.isFree,
+          requests: u.requests,
+          tokens: u.tokens,
+          cost: u.cost
+        });
+      }
+    });
+
+    // Sort active (used in 24h) models to top of Chat list, preserving selector order within each group
+    chatRows.sort((a, b) => {
+      const aUsed = a.requests > 0 || a.tokens > 0 || a.cost > 0 ? 1 : 0;
+      const bUsed = b.requests > 0 || b.tokens > 0 || b.cost > 0 ? 1 : 0;
+      return bUsed - aUsed;
+    });
+
+    const ttsRows = TTS_MODELS.map((t) => {
+      const u = byKey[`tts:${t.id}`] || { requests: 0, chars: 0, cost: 0 };
+      return {
+        id: t.id,
+        label: t.name,
+        requests: u.requests,
+        chars: u.chars,
+        cost: u.cost
+      };
+    });
+
+    const sttRows = STT_MODELS.map((s) => {
+      const u = byKey[`stt:${s.id}`] || { requests: 0, seconds: 0, cost: 0 };
+      return {
+        id: s.id,
+        label: s.name,
+        requests: u.requests,
+        seconds: u.seconds,
+        cost: u.cost
+      };
+    });
+
+    const sectionHead = (title) =>
+      `<div style="font-size:11px;font-weight:500;letter-spacing:0.04em;text-transform:uppercase;color:var(--text-meta);padding-top:4px;">${title}</div>`;
+
+    let tableHtml = '';
+
+    tableHtml += sectionHead('Chat · Gemini (24ч)');
+    chatRows.forEach((r) => {
+      const isUsed = r.requests > 0 || r.tokens > 0 || r.cost > 0;
+      const dimStyle = isUsed ? '' : 'opacity:0.55;';
+      let subText = '';
+      let valText = '';
+
+      if (r.isFree) {
+        const mRl = state.modelRateLimits && state.modelRateLimits[r.id];
+        const mLimit = mRl && typeof mRl.limit === 'number' && mRl.limit > 0 ? mRl.limit : freeLimit;
+        const mUsed =
+          mRl && typeof mRl.limit === 'number' && typeof mRl.remaining === 'number' && mRl.limit >= mRl.remaining
+            ? Math.max(r.requests, mRl.limit - mRl.remaining)
+            : r.requests;
+        const mRst = getResetCountdownHHMM(mRl ? mRl.resetMs : null);
+        subText = `Q ${mUsed}/${mLimit}, RST in ${mRst}`;
+        valText = r.tokens > 0 ? `${formatCompactInt(r.tokens)} tok` : '0';
+      } else {
+        subText = r.tokens > 0 ? `${formatCompactInt(r.tokens)} tok` : '0 tok';
+        valText = r.cost > 0 ? `$${formatUsd3(r.cost)}` : '$0.000';
+      }
+
+      tableHtml += `
+        <div class="stats-row" style="${dimStyle}">
+          <div style="min-width:0;">
+            <div class="stats-row-name">${escapeHtml(r.label)}</div>
+            <div class="stats-row-sub">${escapeHtml(subText)}</div>
+          </div>
+          <div class="stats-row-val">${escapeHtml(valText)}</div>
+        </div>`;
+    });
+
+    tableHtml += sectionHead('TTS · Озвучка (24ч)');
+    ttsRows.forEach((r) => {
+      const isUsed = r.requests > 0 || r.chars > 0 || r.cost > 0;
+      const dimStyle = isUsed ? '' : 'opacity:0.55;';
+      const subText = r.chars > 0 ? `${formatCompactInt(r.chars)} симв` : '0 симв';
+      const valText = r.cost > 0 ? `$${formatUsd3(r.cost)}` : '$0.000';
+      tableHtml += `
+        <div class="stats-row" style="${dimStyle}">
+          <div style="min-width:0;">
+            <div class="stats-row-name">${escapeHtml(r.label)}</div>
+            <div class="stats-row-sub">${escapeHtml(subText)}</div>
+          </div>
+          <div class="stats-row-val">${escapeHtml(valText)}</div>
+        </div>`;
+    });
+
+    tableHtml += sectionHead('STT · Микрофон (24ч)');
+    sttRows.forEach((r) => {
+      const isUsed = r.requests > 0 || r.seconds > 0 || r.cost > 0;
+      const dimStyle = isUsed ? '' : 'opacity:0.55;';
+      const subText = r.seconds > 0 ? `${formatCompactInt(r.seconds)} сек` : '0 сек';
+      const valText = r.cost > 0 ? `$${formatUsd3(r.cost)}` : '$0.000';
+      tableHtml += `
+        <div class="stats-row" style="${dimStyle}">
+          <div style="min-width:0;">
+            <div class="stats-row-name">${escapeHtml(r.label)}</div>
+            <div class="stats-row-sub">${escapeHtml(subText)}</div>
+          </div>
+          <div class="stats-row-val">${escapeHtml(valText)}</div>
+        </div>`;
+    });
+
     statsPanel.innerHTML = `
       <div class="stats-card">
         <div class="stats-top-row">
-          <div>
-            <div class="stats-balance-lbl">Остаток OpenRouter</div>
-            <div class="stats-balance-val">$0.000</div>
+          <div style="min-width:0;">
+            <div class="stats-balance-lbl">Баланс OpenRouter</div>
+            <div class="stats-balance-val">${accBal !== null ? `$${formatUsd3(accBal)}` : '$0.000'}</div>
+            ${keyLimitSubHtml}
           </div>
-          <div style="text-align:right;">
-            <div class="stats-balance-lbl">За 24ч</div>
-            <div style="font-size:15px;font-weight:500;color:var(--menu-active-text);">$0.000</div>
+          <div style="text-align:right;flex-shrink:0;">
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;">
+              <span class="stats-balance-lbl">За 24ч</span>
+              <button class="mdd-refresh-btn" id="statsRefreshBtn" type="button" ${state.balanceLoading ? 'disabled' : ''}>${state.balanceLoading ? '…' : '↻'}</button>
+            </div>
+            <div style="font-size:15px;font-weight:500;color:var(--menu-active-text);margin-top:2px;">${dailySpendText}</div>
+            ${apiDailyHint}
           </div>
         </div>
 
         <div class="stats-quota-box">
-          <span style="color:var(--text-level);">Детализация 24ч</span>
-          <span style="color:var(--menu-active-text);font-weight:500;">Шаг 3</span>
+          <span style="color:var(--text-level);">Free (:free)</span>
+          <span style="color:var(--menu-active-text);font-weight:500;">Q ${totalFreeReqs24h}/${freeLimit}, RST in ${globalRst}</span>
         </div>
 
         <div class="stats-table stats-table-scroll">
-          <div class="stats-row">
-            <div style="min-width:0;">
-              <div class="stats-row-name">Chat · ${escapeHtml(state.modelLabel)}</div>
-              <div class="stats-row-sub">0 tok</div>
-            </div>
-            <div class="stats-row-val">$0.000</div>
-          </div>
-          <div class="stats-row">
-            <div style="min-width:0;">
-              <div class="stats-row-name">TTS · ${escapeHtml(ttsName)}</div>
-              <div class="stats-row-sub">0 симв</div>
-            </div>
-            <div class="stats-row-val">$0.000</div>
-          </div>
-          <div class="stats-row">
-            <div style="min-width:0;">
-              <div class="stats-row-name">STT · ${escapeHtml(sttName)}</div>
-              <div class="stats-row-sub">0 сек</div>
-            </div>
-            <div class="stats-row-val">$0.000</div>
-          </div>
+          ${tableHtml}
         </div>
       </div>`;
+
+    const refreshBtn = document.getElementById('statsRefreshBtn');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fetchOpenRouterBalance(true);
+      });
+    }
   }
 
   function setBottomPanel(nextPanel) {
@@ -1453,8 +1851,19 @@
       closePopover();
     }
 
+    if (state.statsTickTimer) {
+      clearInterval(state.statsTickTimer);
+      state.statsTickTimer = null;
+    }
+
     if (nextPanel === 'stats') {
       renderStatsPanelContent();
+      fetchOpenRouterBalance(false);
+      state.statsTickTimer = setInterval(() => {
+        if (state.activeBottomPanel === 'stats') {
+          renderStatsPanelContent();
+        }
+      }, 30000);
     }
 
     state.activeBottomPanel = nextPanel;
@@ -2885,7 +3294,7 @@
         signal: controller.signal
       });
 
-      captureRateLimitHeaders(resp.headers);
+      captureRateLimitHeaders(resp.headers, capturedModelId);
 
       if (!resp.ok) {
         const detail = await parseResponseErrorText(resp);
@@ -3035,6 +3444,7 @@
           cost: costUsd,
           isFree: Boolean(curModel.isFree)
         });
+        scheduleBalanceRefreshAfterRequest();
       }
     } catch (err) {
       if (state.generatingMsgId !== aiId || (err && err.name === 'AbortError')) {
@@ -3107,6 +3517,7 @@
     const triggerFetch = () => {
       lastFetchedOrKey = state.apiKeys.openrouter;
       fetchGeminiModelsFromOpenRouter(false);
+      fetchOpenRouterBalance(false);
     };
 
     if (immediateFetch) {
@@ -3787,7 +4198,25 @@
     }
     const rlRec = await idbGet('kv', 'rateLimitInfo');
     if (rlRec && rlRec.value) {
-      state.rateLimitInfo = rlRec.value;
+      const rl = rlRec.value;
+      state.rateLimitInfo = {
+        limit: rl.limit !== undefined ? rl.limit : null,
+        remaining: rl.remaining !== undefined ? rl.remaining : null,
+        resetMs: rl.resetMs !== undefined ? rl.resetMs : normalizeResetTimestampMs(rl.reset),
+        updatedAt: rl.updatedAt || 0
+      };
+    }
+    const mRlRec = await idbGet('kv', 'modelRateLimits');
+    if (mRlRec && mRlRec.value && typeof mRlRec.value === 'object') {
+      state.modelRateLimits = mRlRec.value;
+    }
+    const credRec = await idbGet('kv', 'creditsInfo');
+    if (credRec && credRec.value) {
+      state.creditsInfo = Object.assign(state.creditsInfo, credRec.value);
+    }
+    const keyInfoRec = await idbGet('kv', 'keyInfo');
+    if (keyInfoRec && keyInfoRec.value) {
+      state.keyInfo = Object.assign(state.keyInfo, keyInfoRec.value);
     }
 
     lastFetchedOrKey = state.apiKeys.openrouter || '';
@@ -3797,6 +4226,7 @@
     await hydrateFromIndexedDB();
 
     syncHeaderUI();
+    syncBalanceButtonUI();
     syncAudioPanelUI();
     syncPersonaUI();
     syncDrawerSettingsUI();
@@ -3806,8 +4236,18 @@
     renderFeed();
     renderChatList();
 
-    // Fetch live Gemini text models from OpenRouter on startup
+    // Fetch live Gemini text models & account balance from OpenRouter on startup
     fetchGeminiModelsFromOpenRouter(false);
+    fetchOpenRouterBalance(false);
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        const age = Date.now() - (state.creditsInfo.updatedAt || 0);
+        if (age > 15000 && (state.apiKeys.openrouter || '').trim()) {
+          fetchOpenRouterBalance(false);
+        }
+      }
+    });
   }
 
   initApp();
