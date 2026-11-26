@@ -2,7 +2,7 @@
   'use strict';
 
   /* =========================================================================
-     CONSTANTS & CATALOGS (STEP 4.7: OPENROUTER PROMPT CACHING + STICKY ROUTING + CACHE STATS)
+     CONSTANTS & CATALOGS (STEP 4.8: STRICT TEXT-ONLY LLM SANITIZER + TOKEN BREAKDOWN)
      ========================================================================= */
   const DB_NAME = 'OpenRouterPWA_DB';
   const DB_VERSION = 2;
@@ -2564,11 +2564,17 @@
       if (payload.role === 'assistant') {
         const modelName = payload.model || state.modelLabel;
         html += `<div class="info-pop-model">Модель: <strong>${escapeHtml(modelName)}</strong></div>`;
-        if (payload.usage && payload.usage.promptTokens > 0) {
+        if (payload.usage && (payload.usage.promptTokens > 0 || payload.usage.completionTokens > 0)) {
           const pTok = Number(payload.usage.promptTokens) || 0;
           const cTok = Math.min(pTok, Number(payload.usage.cachedTokens) || 0);
-          const pct = Math.min(100, Math.round((cTok / pTok) * 100));
-          html += `<div class="info-pop-model">Кэш: <strong>${formatCompactInt(cTok)} / ${formatCompactInt(pTok)}</strong> (${pct}%)</div>`;
+          const outTok = Number(payload.usage.completionTokens) || 0;
+          const rTok = Number(payload.usage.reasoningTokens) || 0;
+          const pct = pTok > 0 ? Math.min(100, Math.round((cTok / pTok) * 100)) : 0;
+          html += `<div class="info-pop-model">Вход: <strong>${formatCompactInt(pTok)}</strong> (кэш ${formatCompactInt(cTok)} · ${pct}%)</div>`;
+          html += `<div class="info-pop-model">Выход: <strong>${formatCompactInt(outTok)}</strong>${rTok > 0 ? ` (think ${formatCompactInt(rTok)})` : ''}</div>`;
+          if (payload.usage.sentChars > 0) {
+            html += `<div class="info-pop-model">Текст в запросе: <strong>${formatCompactInt(payload.usage.sentChars)}</strong> симв.</div>`;
+          }
         }
       }
       html += '</div>';
@@ -5332,9 +5338,15 @@
       if (ct.includes('application/json')) {
         const json = await resp.json();
         transcript = String((json && (json.text || (json.data && json.data.text))) || '').trim();
+      } else if (ct.startsWith('text/plain') || !ct) {
+        const rawTxt = String(await resp.text()).trim();
+        if (!/^<(?:!doctype|html|head|body)\b/i.test(rawTxt)) {
+          transcript = rawTxt;
+        }
       } else {
-        transcript = String(await resp.text()).trim();
+        throw new Error(`STT вернул нетекстовый ответ (${ct.split(';')[0]})`);
       }
+      transcript = sanitizeTextForLlmHistory(transcript);
 
       const estCost = sttMeta && sttMeta.usdPerMin
         ? (elapsedSec / 60) * sttMeta.usdPerMin
@@ -5430,34 +5442,90 @@
     };
   }
 
+  function sanitizeTextForLlmHistory(raw) {
+    if (typeof raw !== 'string') return '';
+    let s = raw;
+
+    // 1. Strip any embedded data: URI with base64 payload (audio/wav, audio/mp3, image/*, application/*, etc.)
+    s = s.replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+(?:;[^,\s]*)?;base64,[A-Za-z0-9+/=_\-\r\n]+/gi, '');
+
+    // 2. Strip standalone raw Base64 blobs (>= 512 chars) outside normal URLs
+    s = s.replace(/\S{512,}/g, (token) => {
+      if (/^https?:\/\//i.test(token)) return token;
+      const compact = token.replace(/[\r\n]/g, '');
+      if (compact.length >= 512 && /^[A-Za-z0-9+/=_-]+$/.test(compact)) {
+        return '';
+      }
+      return token;
+    });
+
+    // 3. Strip null/control binary characters & replacement-char garbage runs
+    s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+/g, '');
+    s = s.replace(/\uFFFD{3,}/g, '');
+
+    return s.trim();
+  }
+
+  function extractStrictPlainText(val) {
+    if (typeof val === 'string') return sanitizeTextForLlmHistory(val);
+    if (Array.isArray(val)) {
+      return sanitizeTextForLlmHistory(
+        val
+          .filter((p) => p && p.type === 'text' && typeof p.text === 'string')
+          .map((p) => p.text)
+          .join('\n')
+      );
+    }
+    return '';
+  }
+
   function toCachedMultipartContent(text) {
     return [
       {
         type: 'text',
-        text: String(text),
+        text: sanitizeTextForLlmHistory(String(text)),
         cache_control: { type: 'ephemeral' }
       }
     ];
+  }
+
+  function countRequestMessagesChars(messages) {
+    if (!Array.isArray(messages)) return 0;
+    let total = 0;
+    for (let i = 0; i < messages.length; i++) {
+      const c = messages[i] && messages[i].content;
+      if (typeof c === 'string') {
+        total += c.length;
+      } else if (Array.isArray(c)) {
+        for (let j = 0; j < c.length; j++) {
+          if (c[j] && c[j].type === 'text' && typeof c[j].text === 'string') {
+            total += c[j].text.length;
+          }
+        }
+      }
+    }
+    return total;
   }
 
   function buildChatRequestMessages(chat, excludeMsgId, enablePromptCaching = false) {
     const out = [];
     const activePersona = state.personas[state.activePersonaIndex];
     const sysInstructions = activePersona && typeof activePersona.instructions === 'string'
-      ? activePersona.instructions.trim()
+      ? sanitizeTextForLlmHistory(activePersona.instructions)
       : '';
 
     if (sysInstructions) {
       out.push({ role: 'system', content: sysInstructions });
     }
 
+    // Strict allowlist: ONLY pure text from user/assistant messages; zero audio/base64/binary fields
     (chat.messages || []).forEach((m) => {
       if (!m || m.id === excludeMsgId || m.isError) return;
       if (m.role === 'user') {
-        const txt = (m.text || '').trim();
+        const txt = extractStrictPlainText(m.text);
         if (txt) out.push({ role: 'user', content: txt });
       } else if (m.role === 'assistant') {
-        const txt = (m.plainText || '').trim();
+        const txt = extractStrictPlainText(m.plainText);
         if (txt) out.push({ role: 'assistant', content: txt });
       }
     });
@@ -5505,24 +5573,36 @@
         next.input_tokens_details || {}
       );
     }
+    if (prev.completion_tokens_details || next.completion_tokens_details) {
+      merged.completion_tokens_details = Object.assign(
+        {},
+        prev.completion_tokens_details || {},
+        next.completion_tokens_details || {}
+      );
+    }
     return merged;
   }
 
   function extractCachedTokensFromUsage(usage) {
     if (!usage || typeof usage !== 'object') {
-      return { cachedTokens: 0, cacheWriteTokens: 0 };
+      return { cachedTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
     }
     const details = usage.prompt_tokens_details || usage.input_tokens_details || {};
+    const compDetails = usage.completion_tokens_details || usage.output_tokens_details || {};
     const rawCached =
       details.cached_tokens !== undefined ? details.cached_tokens :
       (usage.cache_read_input_tokens !== undefined ? usage.cache_read_input_tokens : usage.cached_tokens);
     const rawWrite =
       details.cache_write_tokens !== undefined ? details.cache_write_tokens :
       usage.cache_creation_input_tokens;
+    const rawReasoning =
+      compDetails.reasoning_tokens !== undefined ? compDetails.reasoning_tokens :
+      usage.reasoning_tokens;
 
     return {
       cachedTokens: Math.max(0, Number(rawCached) || 0),
-      cacheWriteTokens: Math.max(0, Number(rawWrite) || 0)
+      cacheWriteTokens: Math.max(0, Number(rawWrite) || 0),
+      reasoningTokens: Math.max(0, Number(rawReasoning) || 0)
     };
   }
 
@@ -5874,9 +5954,12 @@
 
     const usePromptCaching = Boolean(endpoint.isOpenRouter) && (!curModel || curModel.supportsPromptCaching !== false);
 
+    const outgoingMessages = buildChatRequestMessages(chat, aiId, usePromptCaching);
+    const sentPayloadChars = countRequestMessagesChars(outgoingMessages);
+
     const requestBody = {
       model: capturedModelId,
-      messages: buildChatRequestMessages(chat, aiId, usePromptCaching),
+      messages: outgoingMessages,
       stream: true,
       stream_options: { include_usage: true }
     };
@@ -6083,7 +6166,7 @@
         const promptTok = Number(finalUsage && finalUsage.prompt_tokens) || 0;
         const compTok = Number(finalUsage && finalUsage.completion_tokens) || 0;
         const totalTok = Number(finalUsage && finalUsage.total_tokens) || (promptTok + compTok);
-        const { cachedTokens, cacheWriteTokens } = extractCachedTokensFromUsage(finalUsage);
+        const { cachedTokens, cacheWriteTokens, reasoningTokens } = extractCachedTokensFromUsage(finalUsage);
         const uncachedPromptTok = Math.max(0, promptTok - cachedTokens);
 
         let costUsd = 0;
@@ -6109,8 +6192,10 @@
           aiMsg.usage = {
             promptTokens: promptTok,
             completionTokens: compTok,
+            reasoningTokens,
             cachedTokens,
             cacheWriteTokens,
+            sentChars: sentPayloadChars,
             cost: costUsd
           };
           persistChat(chat);
