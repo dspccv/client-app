@@ -2,7 +2,7 @@
   'use strict';
 
   /* =========================================================================
-     CONSTANTS & CATALOGS (STEP 4.6: PER-PERSONA TTS TAGS + GROK/GEMINI ROUTING + STT PRICING)
+     CONSTANTS & CATALOGS (STEP 4.7: OPENROUTER PROMPT CACHING + STICKY ROUTING + CACHE STATS)
      ========================================================================= */
   const DB_NAME = 'OpenRouterPWA_DB';
   const DB_VERSION = 2;
@@ -743,7 +743,8 @@
         isError: m.isError ? true : undefined,
         text: m.text !== undefined ? m.text : undefined,
         html: m.html !== undefined ? m.html : undefined,
-        plainText: m.plainText !== undefined ? m.plainText : undefined
+        plainText: m.plainText !== undefined ? m.plainText : undefined,
+        usage: m.usage || undefined
       }))
     };
   }
@@ -1154,6 +1155,9 @@
     if (typeof ov.supportsFlex === 'boolean') {
       modelObj.supportsFlex = ov.supportsFlex;
     }
+    if (typeof ov.supportsPromptCaching === 'boolean') {
+      modelObj.supportsPromptCaching = ov.supportsPromptCaching;
+    }
     return modelObj;
   }
 
@@ -1270,6 +1274,8 @@
       const supportsFlex = deriveFlexSupport(raw);
       const promptPrice = parseFloat(raw.pricing && raw.pricing.prompt) || 0;
       const completionPrice = parseFloat(raw.pricing && raw.pricing.completion) || 0;
+      const cacheReadPrice = parseFloat(raw.pricing && raw.pricing.input_cache_read);
+      const cacheWritePrice = parseFloat(raw.pricing && raw.pricing.input_cache_write);
 
       mapped.push(applyModelCapsOverride({
         id,
@@ -1277,12 +1283,15 @@
         fullName: raw.name || id,
         supportsFlex,
         supportsReasoning,
+        supportsPromptCaching: true,
         thinkingLevels,
         isFree,
         contextLength: raw.context_length || 0,
         pricing: {
           prompt: promptPrice,
-          completion: completionPrice
+          completion: completionPrice,
+          cacheRead: Number.isFinite(cacheReadPrice) ? cacheReadPrice : null,
+          cacheWrite: Number.isFinite(cacheWritePrice) ? cacheWritePrice : null
         }
       }));
     });
@@ -1923,6 +1932,8 @@
           modelLabel: e.modelLabel || e.modelId,
           requests: 0,
           tokens: 0,
+          promptTokens: 0,
+          cachedTokens: 0,
           chars: 0,
           seconds: 0,
           cost: 0,
@@ -1932,6 +1943,8 @@
       const bucket = byKey[k];
       bucket.requests += 1;
       bucket.tokens += Number(e.tokens) || 0;
+      bucket.promptTokens += Number(e.promptTokens) || 0;
+      bucket.cachedTokens += Number(e.cachedTokens) || 0;
       bucket.chars += Number(e.chars) || 0;
       bucket.seconds += Number(e.seconds) || 0;
       bucket.cost += Number(e.cost) || 0;
@@ -1971,13 +1984,15 @@
     const seenChatIds = new Set();
     (state.chatModels || []).forEach((m) => {
       seenChatIds.add(m.id);
-      const u = byKey[`chat:${m.id}`] || { requests: 0, tokens: 0, cost: 0, isFree: Boolean(m.isFree) };
+      const u = byKey[`chat:${m.id}`] || { requests: 0, tokens: 0, promptTokens: 0, cachedTokens: 0, cost: 0, isFree: Boolean(m.isFree) };
       chatRows.push({
         id: m.id,
         label: m.label,
         isFree: Boolean(m.isFree || m.id.endsWith(':free')),
         requests: u.requests,
         tokens: u.tokens,
+        promptTokens: u.promptTokens || 0,
+        cachedTokens: u.cachedTokens || 0,
         cost: u.cost
       });
     });
@@ -1990,6 +2005,8 @@
           isFree: u.isFree,
           requests: u.requests,
           tokens: u.tokens,
+          promptTokens: u.promptTokens || 0,
+          cachedTokens: u.cachedTokens || 0,
           cost: u.cost
         });
       }
@@ -2047,7 +2064,12 @@
         subText = `Q ${mUsed}/${mLimit}, RST in ${mRst}`;
         valText = r.tokens > 0 ? `${formatCompactInt(r.tokens)} tok` : '0';
       } else {
-        subText = r.tokens > 0 ? `${formatCompactInt(r.tokens)} tok` : '0 tok';
+        if (r.tokens > 0 && r.cachedTokens > 0 && r.promptTokens > 0) {
+          const hitPct = Math.min(100, Math.round((r.cachedTokens / r.promptTokens) * 100));
+          subText = `${formatCompactInt(r.tokens)} tok · кэш ${hitPct}%`;
+        } else {
+          subText = r.tokens > 0 ? `${formatCompactInt(r.tokens)} tok` : '0 tok';
+        }
         valText = r.cost > 0 ? `$${formatUsd3(r.cost)}` : '$0.000';
       }
 
@@ -2542,6 +2564,12 @@
       if (payload.role === 'assistant') {
         const modelName = payload.model || state.modelLabel;
         html += `<div class="info-pop-model">Модель: <strong>${escapeHtml(modelName)}</strong></div>`;
+        if (payload.usage && payload.usage.promptTokens > 0) {
+          const pTok = Number(payload.usage.promptTokens) || 0;
+          const cTok = Math.min(pTok, Number(payload.usage.cachedTokens) || 0);
+          const pct = Math.min(100, Math.round((cTok / pTok) * 100));
+          html += `<div class="info-pop-model">Кэш: <strong>${formatCompactInt(cTok)} / ${formatCompactInt(pTok)}</strong> (${pct}%)</div>`;
+        }
       }
       html += '</div>';
 
@@ -5402,7 +5430,17 @@
     };
   }
 
-  function buildChatRequestMessages(chat, excludeMsgId) {
+  function toCachedMultipartContent(text) {
+    return [
+      {
+        type: 'text',
+        text: String(text),
+        cache_control: { type: 'ephemeral' }
+      }
+    ];
+  }
+
+  function buildChatRequestMessages(chat, excludeMsgId, enablePromptCaching = false) {
     const out = [];
     const activePersona = state.personas[state.activePersonaIndex];
     const sysInstructions = activePersona && typeof activePersona.instructions === 'string'
@@ -5424,7 +5462,79 @@
       }
     });
 
+    // OpenRouter Prompt Caching (Anthropic / Google Gemini explicit breakpoints):
+    // Breakpoint 1: static system prompt (keeps persona cached across turns & edits)
+    // Breakpoint 2: rolling last historical message right before the new user turn
+    if (enablePromptCaching && out.length > 0) {
+      if (out[0].role === 'system' && typeof out[0].content === 'string' && out[0].content.length >= 256) {
+        out[0] = {
+          role: 'system',
+          content: toCachedMultipartContent(out[0].content)
+        };
+      }
+
+      // Place rolling cache breakpoint on the message immediately preceding the latest user turn
+      const lastIdx = out.length - 1;
+      const historyIdx = lastIdx >= 1 && out[lastIdx].role === 'user' ? lastIdx - 1 : -1;
+      if (historyIdx >= 0 && out[historyIdx].role !== 'system' && typeof out[historyIdx].content === 'string') {
+        out[historyIdx] = {
+          role: out[historyIdx].role,
+          content: toCachedMultipartContent(out[historyIdx].content)
+        };
+      }
+    }
+
     return out;
+  }
+
+  function mergeStreamUsage(prev, next) {
+    if (!next || typeof next !== 'object') return prev;
+    if (!prev) return Object.assign({}, next);
+    const merged = Object.assign({}, prev, next);
+    if (prev.prompt_tokens_details || next.prompt_tokens_details) {
+      merged.prompt_tokens_details = Object.assign(
+        {},
+        prev.prompt_tokens_details || {},
+        next.prompt_tokens_details || {}
+      );
+    }
+    if (prev.input_tokens_details || next.input_tokens_details) {
+      merged.input_tokens_details = Object.assign(
+        {},
+        prev.input_tokens_details || {},
+        next.input_tokens_details || {}
+      );
+    }
+    return merged;
+  }
+
+  function extractCachedTokensFromUsage(usage) {
+    if (!usage || typeof usage !== 'object') {
+      return { cachedTokens: 0, cacheWriteTokens: 0 };
+    }
+    const details = usage.prompt_tokens_details || usage.input_tokens_details || {};
+    const rawCached =
+      details.cached_tokens !== undefined ? details.cached_tokens :
+      (usage.cache_read_input_tokens !== undefined ? usage.cache_read_input_tokens : usage.cached_tokens);
+    const rawWrite =
+      details.cache_write_tokens !== undefined ? details.cache_write_tokens :
+      usage.cache_creation_input_tokens;
+
+    return {
+      cachedTokens: Math.max(0, Number(rawCached) || 0),
+      cacheWriteTokens: Math.max(0, Number(rawWrite) || 0)
+    };
+  }
+
+  function isCacheControlRejectionError(status, detail) {
+    if (status !== 400 && status !== 422) return false;
+    const lower = String(detail || '').toLowerCase();
+    return (
+      lower.includes('cache_control') ||
+      lower.includes('cache control') ||
+      lower.includes('ephemeral') ||
+      (lower.includes('content') && lower.includes('must be a string'))
+    );
   }
 
   function learnFromReasoningApiError(modelObj, sentThinking, rawDetail) {
@@ -5762,12 +5872,23 @@
     syncSendButton();
     renderFeed(true);
 
+    const usePromptCaching = Boolean(endpoint.isOpenRouter) && (!curModel || curModel.supportsPromptCaching !== false);
+
     const requestBody = {
       model: capturedModelId,
-      messages: buildChatRequestMessages(chat, aiId),
+      messages: buildChatRequestMessages(chat, aiId, usePromptCaching),
       stream: true,
       stream_options: { include_usage: true }
     };
+
+    if (endpoint.isOpenRouter) {
+      // OpenRouter native flag to always include cached_tokens + exact discounted cost in SSE usage
+      requestBody.usage = { include: true };
+      // Stable per-chat identifier helps OpenRouter sticky-route to the same provider/replica for cache hits
+      if (chat && chat.id) {
+        requestBody.user = String(chat.id).slice(0, 128);
+      }
+    }
 
     if (curModel && curModel.supportsReasoning) {
       if (state.thinking === 'none' && availableLevels.some((l) => l.id === 'none')) {
@@ -5798,7 +5919,7 @@
     let streamError = null;
 
     try {
-      const resp = await fetch(endpoint.url, {
+      let resp = await fetch(endpoint.url, {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody),
@@ -5808,13 +5929,33 @@
       captureRateLimitHeaders(resp.headers, capturedModelId);
 
       if (!resp.ok) {
-        const detail = await parseResponseErrorText(resp);
+        let detail = await parseResponseErrorText(resp);
         if (state.generatingMsgId !== aiId) return;
-        const learnedMsg = (resp.status === 400 || resp.status === 422)
-          ? learnFromReasoningApiError(curModel, capturedThinking, detail)
-          : null;
-        setAssistantError(chat, aiMsg, learnedMsg || formatApiErrorForChat(resp.status, detail, usingFlex, capturedModelLabel));
-        return;
+
+        // Safe auto-fallback if a specific model/endpoint rejects explicit cache_control blocks
+        if (usePromptCaching && isCacheControlRejectionError(resp.status, detail)) {
+          saveModelCapsOverride(capturedModelId, { supportsPromptCaching: false });
+          requestBody.messages = buildChatRequestMessages(chat, aiId, false);
+          resp = await fetch(endpoint.url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(requestBody),
+            signal: controller.signal
+          });
+          captureRateLimitHeaders(resp.headers, capturedModelId);
+          if (!resp.ok) {
+            detail = await parseResponseErrorText(resp);
+            if (state.generatingMsgId !== aiId) return;
+          }
+        }
+
+        if (!resp.ok) {
+          const learnedMsg = (resp.status === 400 || resp.status === 422)
+            ? learnFromReasoningApiError(curModel, capturedThinking, detail)
+            : null;
+          setAssistantError(chat, aiMsg, learnedMsg || formatApiErrorForChat(resp.status, detail, usingFlex, capturedModelLabel));
+          return;
+        }
       }
 
       const contentType = (resp.headers.get('content-type') || '').toLowerCase();
@@ -5830,7 +5971,7 @@
         }
         const choice = data && data.choices && data.choices[0];
         const content = choice && choice.message && choice.message.content ? String(choice.message.content) : '';
-        if (data && data.usage) finalUsage = data.usage;
+        if (data && data.usage) finalUsage = mergeStreamUsage(finalUsage, data.usage);
         aiMsg.liveThinking = null;
         aiMsg.streaming = false;
         aiMsg.plainText = content;
@@ -5862,7 +6003,7 @@
           }
 
           if (parsed && parsed.usage) {
-            finalUsage = parsed.usage;
+            finalUsage = mergeStreamUsage(finalUsage, parsed.usage);
           }
 
           const choice = parsed && parsed.choices && parsed.choices[0];
@@ -5937,17 +6078,44 @@
         }
       }
 
-      // Log usage into 24h IndexedDB store (consumed by Step 3 balance details)
+      // Log usage (including cached_tokens & discounted cost) into 24h IndexedDB store + message metadata
       if (!aiMsg.isError && curModel) {
         const promptTok = Number(finalUsage && finalUsage.prompt_tokens) || 0;
         const compTok = Number(finalUsage && finalUsage.completion_tokens) || 0;
         const totalTok = Number(finalUsage && finalUsage.total_tokens) || (promptTok + compTok);
+        const { cachedTokens, cacheWriteTokens } = extractCachedTokensFromUsage(finalUsage);
+        const uncachedPromptTok = Math.max(0, promptTok - cachedTokens);
+
         let costUsd = 0;
         if (finalUsage && typeof finalUsage.cost === 'number') {
           costUsd = finalUsage.cost;
         } else if (curModel.pricing) {
-          costUsd = promptTok * (curModel.pricing.prompt || 0) + compTok * (curModel.pricing.completion || 0);
+          const pPrice = curModel.pricing.prompt || 0;
+          const cPrice = curModel.pricing.completion || 0;
+          const readPrice = typeof curModel.pricing.cacheRead === 'number' && curModel.pricing.cacheRead >= 0
+            ? curModel.pricing.cacheRead
+            : pPrice * 0.1;
+          const writePrice = typeof curModel.pricing.cacheWrite === 'number' && curModel.pricing.cacheWrite > 0
+            ? curModel.pricing.cacheWrite
+            : 0;
+          costUsd =
+            uncachedPromptTok * pPrice +
+            cachedTokens * readPrice +
+            cacheWriteTokens * writePrice +
+            compTok * cPrice;
         }
+
+        if (promptTok > 0 || compTok > 0) {
+          aiMsg.usage = {
+            promptTokens: promptTok,
+            completionTokens: compTok,
+            cachedTokens,
+            cacheWriteTokens,
+            cost: costUsd
+          };
+          persistChat(chat);
+        }
+
         recordUsageEntry({
           type: 'chat',
           modelId: capturedModelId,
@@ -5955,6 +6123,8 @@
           tokens: totalTok,
           promptTokens: promptTok,
           completionTokens: compTok,
+          cachedTokens,
+          cacheWriteTokens,
           cost: costUsd,
           isFree: Boolean(curModel.isFree)
         });
