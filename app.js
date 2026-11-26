@@ -2,10 +2,10 @@
   'use strict';
 
   /* =========================================================================
-     CONSTANTS & CATALOGS (STEP 4: TTS + STT + iOS SAFARI AUDIO MECHANICS)
+     CONSTANTS & CATALOGS (STEP 4.1: IDB TTS CACHE + CHUNK0 +25% + STRICT 1-AHEAD + NO BATCH)
      ========================================================================= */
   const DB_NAME = 'OpenRouterPWA_DB';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
 
   const ALL_THINKING_LEVELS = [
@@ -487,6 +487,9 @@
         }
         if (!db.objectStoreNames.contains('chats')) {
           db.createObjectStore('chats', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('ttsCache')) {
+          db.createObjectStore('ttsCache', { keyPath: 'key' });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -982,11 +985,24 @@
     '-live',
     '-audio',
     'lyria',
-    'veo'
+    'veo',
+    ':batch',
+    '-batch',
+    '/batch'
   ];
+
+  function isBatchModelMeta(raw) {
+    if (!raw) return false;
+    const id = String(raw.id || '').toLowerCase();
+    const name = String(raw.name || raw.fullName || raw.label || '').toLowerCase();
+    if (id.includes(':batch') || id.includes('-batch') || id.includes('/batch')) return true;
+    if (/\bbatch\b/.test(name)) return true;
+    return false;
+  }
 
   function isTextGeminiModel(raw) {
     if (!raw || typeof raw.id !== 'string') return false;
+    if (isBatchModelMeta(raw)) return false;
     const id = raw.id.toLowerCase();
     if (!id.startsWith('google/gemini-')) return false;
     if (EXCLUDED_MODEL_SUBSTRINGS.some((sub) => id.includes(sub))) return false;
@@ -2778,16 +2794,46 @@
       .filter(Boolean);
     if (paragraphs.length === 0) return [];
 
-    const chunks = [];
-
-    // First paragraph isolated as chunk 0 (up to 550 chars) for fast start
-    const firstParts = splitTextByLimit(paragraphs[0], 550);
-    chunks.push(firstParts[0]);
-
-    const remainingPieces = firstParts.slice(1).concat(paragraphs.slice(1));
-    let current = '';
+    const FIRST_CHUNK_MAX = 690; // +25% vs 550 so chunk 1 has time to finish loading
+    const FIRST_CHUNK_MIN = 360;
     const MAX_CHUNK = 950;
 
+    const chunks = [];
+    let remainingPieces = [];
+
+    if (paragraphs[0].length > FIRST_CHUNK_MAX) {
+      const firstParts = splitTextByLimit(paragraphs[0], FIRST_CHUNK_MAX);
+      chunks.push(firstParts[0]);
+      remainingPieces = firstParts.slice(1).concat(paragraphs.slice(1));
+    } else {
+      let chunk0 = paragraphs[0];
+      let idx = 1;
+      while (idx < paragraphs.length) {
+        const nextPara = paragraphs[idx];
+        if (chunk0.length + 2 + nextPara.length <= FIRST_CHUNK_MAX) {
+          chunk0 += '\n\n' + nextPara;
+          idx += 1;
+        } else if (chunk0.length < FIRST_CHUNK_MIN) {
+          const room = FIRST_CHUNK_MAX - chunk0.length - 2;
+          if (room >= 120) {
+            const sp = splitTextByLimit(nextPara, room);
+            chunk0 += '\n\n' + sp[0];
+            remainingPieces = sp.slice(1).concat(paragraphs.slice(idx + 1));
+            idx = paragraphs.length;
+          } else {
+            break;
+          }
+        } else {
+          break;
+        }
+      }
+      chunks.push(chunk0);
+      if (remainingPieces.length === 0 && idx < paragraphs.length) {
+        remainingPieces = paragraphs.slice(idx);
+      }
+    }
+
+    let current = '';
     remainingPieces.forEach((piece) => {
       if (piece.length > MAX_CHUNK) {
         if (current) {
@@ -2811,7 +2857,9 @@
     return chunks;
   }
 
-  function putTtsCache(key, canonical) {
+  const MAX_TTS_IDB_ITEMS = 25;
+
+  function putTtsCacheRam(key, canonical) {
     if (ttsOriginalWavCache.has(key)) {
       ttsOriginalWavCache.delete(key);
     }
@@ -2822,13 +2870,83 @@
     }
   }
 
+  async function pruneTtsCacheIdb() {
+    try {
+      const all = await idbGetAll('ttsCache');
+      if (!all || all.length <= MAX_TTS_IDB_ITEMS) return;
+      all.sort((a, b) => (a.lastUsedAt || 0) - (b.lastUsedAt || 0));
+      const excessCount = all.length - MAX_TTS_IDB_ITEMS;
+      const keysToDelete = all.slice(0, excessCount).map((r) => r.key).filter(Boolean);
+      await idbDeleteMany('ttsCache', keysToDelete);
+    } catch (_) {}
+  }
+
+  async function getTtsCachePersistent(key) {
+    if (ttsOriginalWavCache.has(key)) {
+      const cached = ttsOriginalWavCache.get(key);
+      ttsOriginalWavCache.delete(key);
+      ttsOriginalWavCache.set(key, cached);
+      return cached;
+    }
+
+    const rec = await idbGet('ttsCache', key);
+    if (!rec || !rec.wav) return null;
+
+    let wavBuf = null;
+    if (rec.wav instanceof ArrayBuffer) {
+      wavBuf = rec.wav;
+    } else if (ArrayBuffer.isView(rec.wav)) {
+      wavBuf = rec.wav.buffer.slice(rec.wav.byteOffset, rec.wav.byteOffset + rec.wav.byteLength);
+    }
+    if (!wavBuf || wavBuf.byteLength < 64) return null;
+
+    const canonical = {
+      originalWav: wavBuf,
+      isPatchableWav: Boolean(rec.isPatchableWav),
+      mimeType: rec.mimeType || 'audio/wav',
+      origSampleRate: Number(rec.origSampleRate) || 24000,
+      blockAlign: Number(rec.blockAlign) || 2,
+      sampleRateOffset: Number(rec.sampleRateOffset) || 24,
+      byteRateOffset: Number(rec.byteRateOffset) || 28,
+      numChannels: Number(rec.numChannels) || 1,
+      bitsPerSample: Number(rec.bitsPerSample) || 16
+    };
+
+    putTtsCacheRam(key, canonical);
+    // Refresh LRU timestamp in IndexedDB asynchronously
+    idbPut('ttsCache', Object.assign({}, rec, { lastUsedAt: Date.now() }));
+    return canonical;
+  }
+
+  function putTtsCache(key, canonical) {
+    putTtsCacheRam(key, canonical);
+    if (!canonical || !canonical.originalWav) return;
+    const record = {
+      key,
+      wav: canonical.originalWav,
+      isPatchableWav: Boolean(canonical.isPatchableWav),
+      mimeType: canonical.mimeType || 'audio/wav',
+      origSampleRate: canonical.origSampleRate || 24000,
+      blockAlign: canonical.blockAlign || 2,
+      sampleRateOffset: canonical.sampleRateOffset || 24,
+      byteRateOffset: canonical.byteRateOffset || 28,
+      numChannels: canonical.numChannels || 1,
+      bitsPerSample: canonical.bitsPerSample || 16,
+      lastUsedAt: Date.now()
+    };
+    idbPut('ttsCache', record).then(() => pruneTtsCacheIdb());
+  }
+
   async function fetchTtsChunkCanonicalWav(chunkText, ttsId, voiceApiId, signal) {
     const cacheKey = `${ttsId}::${voiceApiId}::${chunkText}`;
-    if (ttsOriginalWavCache.has(cacheKey)) {
-      const cached = ttsOriginalWavCache.get(cacheKey);
-      ttsOriginalWavCache.delete(cacheKey);
-      ttsOriginalWavCache.set(cacheKey, cached);
+    const cached = await getTtsCachePersistent(cacheKey);
+    if (cached) {
       return cached;
+    }
+    if (signal && signal.aborted) {
+      const abortErr = new Error('Aborted');
+      abortErr.name = 'AbortError';
+      throw abortErr;
     }
 
     const ttsModelMeta = TTS_MODELS.find((t) => t.id === ttsId) || TTS_MODELS[0];
@@ -3004,7 +3122,7 @@
     if (p && typeof p.catch === 'function') p.catch(() => {});
   }
 
-  function playCanonicalChunkOnSingleAudio(canonical, sessionId) {
+  function playCanonicalChunkOnSingleAudio(canonical, sessionId, onPlaybackStarted = null) {
     return new Promise((resolve, reject) => {
       if (state.ttsSessionId !== sessionId) {
         resolve('aborted');
@@ -3025,6 +3143,16 @@
       state.ttsActiveBlobUrl = blobUrl;
 
       let settled = false;
+      let startedNotified = false;
+
+      const notifyStarted = () => {
+        if (startedNotified || state.ttsSessionId !== sessionId) return;
+        startedNotified = true;
+        if (typeof onPlaybackStarted === 'function') {
+          try { onPlaybackStarted(); } catch (_) {}
+        }
+      };
+
       const finish = (err) => {
         if (settled) return;
         settled = true;
@@ -3056,6 +3184,7 @@
         playPromise
           .then(() => {
             enforceRate();
+            notifyStarted();
           })
           .catch((err) => {
             if (state.ttsSessionId !== sessionId) {
@@ -3064,6 +3193,8 @@
               finish(err || new Error('Автовоспроизведение заблокировано iOS'));
             }
           });
+      } else {
+        notifyStarted();
       }
     });
   }
@@ -3120,23 +3251,39 @@
     const voiceApiId = resolveVoiceApiId(ttsId, state.voiceDraft.voice);
 
     try {
-      let nextChunkPromise = fetchTtsChunkCanonicalWav(chunks[0], ttsId, voiceApiId, controller.signal);
+      // Hold at most 1 lookahead chunk (i + 1) buffered ahead of currently playing chunk i.
+      // Once chunk (i + 1) is ready in memory/cache, no further chunk (i + 2) is requested
+      // until chunk (i + 1) actually starts playing.
+      const chunkBuffer = new Array(chunks.length).fill(null);
+
+      const ensureChunkRequested = (idx) => {
+        if (idx < 0 || idx >= chunks.length) return null;
+        if (state.ttsSessionId !== sessionId) return null;
+        if (!chunkBuffer[idx]) {
+          const p = fetchTtsChunkCanonicalWav(chunks[idx], ttsId, voiceApiId, controller.signal);
+          p.catch(() => {});
+          chunkBuffer[idx] = p;
+        }
+        return chunkBuffer[idx];
+      };
+
+      ensureChunkRequested(0);
 
       for (let i = 0; i < chunks.length; i++) {
         if (state.ttsSessionId !== sessionId) return;
 
-        const canonical = await nextChunkPromise;
+        const canonical = await ensureChunkRequested(i);
         if (state.ttsSessionId !== sessionId) return;
 
-        // Prefetch next chunk while current chunk plays
-        if (i + 1 < chunks.length) {
-          nextChunkPromise = fetchTtsChunkCanonicalWav(chunks[i + 1], ttsId, voiceApiId, controller.signal);
-          nextChunkPromise.catch(() => {});
-        } else {
-          nextChunkPromise = null;
-        }
+        // Trigger download ONLY for the single immediate next chunk (i + 1) once chunk i starts playing
+        await playCanonicalChunkOnSingleAudio(canonical, sessionId, () => {
+          if (i + 1 < chunks.length && !chunkBuffer[i + 1]) {
+            ensureChunkRequested(i + 1);
+          }
+        });
 
-        await playCanonicalChunkOnSingleAudio(canonical, sessionId);
+        // Release reference to played chunk so GC stays lean (pristine copy lives in LRU cache)
+        chunkBuffer[i] = null;
       }
     } catch (err) {
       if (state.ttsSessionId !== sessionId || (err && err.name === 'AbortError')) {
@@ -5243,7 +5390,10 @@
     // 1. Load cached Gemini models & TTS voice catalogs first (fast boot)
     const cachedModelsRec = await idbGet('kv', 'cachedGeminiModels');
     if (cachedModelsRec && cachedModelsRec.value && Array.isArray(cachedModelsRec.value.models) && cachedModelsRec.value.models.length > 0) {
-      state.chatModels = cachedModelsRec.value.models;
+      const filteredCached = cachedModelsRec.value.models.filter((m) => !isBatchModelMeta(m));
+      if (filteredCached.length > 0) {
+        state.chatModels = filteredCached;
+      }
     }
     const cachedTtsVoicesRec = await idbGet('kv', 'cachedTtsVoices');
     if (cachedTtsVoicesRec && cachedTtsVoicesRec.value && typeof cachedTtsVoicesRec.value === 'object') {
