@@ -4,11 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="OpenRouter">
   <meta name="theme-color" content="#000000">
+  <meta name="format-detection" content="telephone=no">
   <title>OpenRouter · PWA Client</title>
 
-  <!-- Separate Google Fonts links: Google Sans, Google Sans Code, Inter (Cyrillic fallback) -->
+  <!-- Separate Google Fonts links: Google Sans, Google Sans Code, Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
@@ -17,24 +20,34 @@
 
   <style>
     /* ==========================================================================
-       DESIGN TOKENS — Seamless #000000 Canvas & Borderless Tonal Gray Plaques
-       ZERO BORDERS OR OUTLINES ANYWHERE IN THE APPLICATION
+       SHARED DESIGN TOKENS — Pure Flat Borderless Monochrome Dark Theme
+       ZERO borders and ZERO outlines anywhere across the entire application
        ========================================================================== */
     :root {
-      --bg-canvas: #000000;
-      --bg-user-card: #151618;
-      --bg-code: #1e1f20;
+      --bg: #000000;
+      --menu-bg: #1e1f24;
+      --menu-dark: #15161a;
+      --surface-composer: #2e3038;
+      --composer-btn: #3e414c;
+      --save-bg: #cfd2da;
+      --save-fg: #121316;
+      --menu-item-h: 44px;
 
-      /* Flat Borderless Tonal Surfaces */
+      --menu-text: #c4c7ce;
+      --menu-active-text: #f1f3f6;
+      --menu-font-size: 15px;
+
+      --bg-code: #1e1f20;
       --bg-header-btn: #222428;
       --bg-header-btn-active: #30333a;
-      --bg-popover: #1e1f24;
-      --bg-thinking-group: #15161a;
-      --bg-popover-sub: #17181d;
-      --bg-surface-elev: #2e3038;
-      --bg-surface-hover: #343741;
+      --bg-surface-hover: #353842;
 
-      /* Left Drawer Plaques */
+      --composer-btn-active: #4b4f5c;
+      --send-ready-bg: #575c69;
+      --send-stop-bg: #6b2b30;
+      --mic-rec-bg: #7a292e;
+      --mic-transcribing-bg: #474b57;
+
       --bg-drawer: #111113;
       --bg-drawer-plaque: #1a1b1f;
       --bg-drawer-tab-active: #2d3036;
@@ -45,24 +58,9 @@
       --bg-checkbox-off: #2a2c32;
       --bg-ctx-menu: #222428;
 
-      /* Floating Dock, Voice Panel, Tier-2 Pills & Composer */
       --bg-scroll-btn: #2b2e34;
       --bg-scroll-btn-active: #3a3e47;
-      --bg-tier2-pill: rgba(38, 40, 46, 0.92);
-      --bg-tier2-pill-active: rgba(52, 55, 64, 0.96);
-      --bg-voice-panel: #22242b;
-      --bg-voice-btn: #2d3039;
-      --bg-voice-btn-elev: #3d414d;
 
-      --bg-composer: rgba(50, 52, 59, 0.95);
-      --bg-composer-btn: #41454f;
-      --bg-composer-btn-active: #505562;
-      --bg-send-ready: #575c69;
-      --bg-send-stop: #5a2b2e;
-      --bg-mic-rec: #7a292e;
-      --bg-mic-transcribing: #474b57;
-
-      /* Text Palette */
       --text-bright: #ffffff;
       --text-header: #e3e3e3;
       --text-chat: #d3d5d9;
@@ -71,13 +69,10 @@
       --text-btn-bright: #f0f2f5;
       --text-code: #c4c7c5;
       --text-chevron: #c4c7c5;
-      --text-row2: #b4b7bc;
       --text-thinking: #a8abb0;
-      --text-tier2: #9a9fa8;
-      --text-tier2-active: #c5c9d2;
       --text-level: #8e9196;
       --text-clear-x: #848891;
-      --text-sub: #767880;
+      --text-meta: #6e717a;
       --text-dim: #58585e;
       --text-disabled: #5a5d66;
 
@@ -85,7 +80,7 @@
       --pill-light-text: #111215;
       --rec-red: #f05d62;
 
-      --radius-pill: 999px;
+      --radius-pill: 9999px;
       --radius-card: 20px;
       --radius-popover: 18px;
 
@@ -117,6 +112,7 @@
       -webkit-touch-callout: default;
     }
 
+    /* Allow selection ONLY inside .msg-body when the drawer is closed */
     body:not(.drawer-open) .msg-body,
     body:not(.drawer-open) .msg-body * {
       -webkit-user-select: text;
@@ -124,6 +120,7 @@
       -webkit-touch-callout: default;
     }
 
+    /* Completely suppress selection inside and outside drawer while drawer is open */
     body.drawer-open .app-shell,
     body.drawer-open .chat-feed,
     body.drawer-open .drawer-backdrop,
@@ -142,13 +139,14 @@
     }
 
     /* ==========================================================================
-       COMPLETE APP UI LOCK DURING MIC RECORDING & TRANSCRIPTION
+       FULL-APP UI LOCK DURING MIC RECORDING & TRANSCRIPTION
        ========================================================================== */
     body.mic-recording .top-header,
     body.mic-recording .chat-feed,
     body.mic-recording .scroll-bottom-btn,
-    body.mic-recording .tier2-bar,
-    body.mic-recording .voice-dock,
+    body.mic-recording .tier2-row,
+    body.mic-recording .floating-panels-layer,
+    body.mic-recording .dock-scrim,
     body.mic-recording .plus-btn,
     body.mic-recording .composer-input-wrap,
     body.mic-recording .send-btn,
@@ -157,8 +155,9 @@
     body.mic-transcribing .top-header,
     body.mic-transcribing .chat-feed,
     body.mic-transcribing .scroll-bottom-btn,
-    body.mic-transcribing .tier2-bar,
-    body.mic-transcribing .voice-dock,
+    body.mic-transcribing .tier2-row,
+    body.mic-transcribing .floating-panels-layer,
+    body.mic-transcribing .dock-scrim,
     body.mic-transcribing .plus-btn,
     body.mic-transcribing .composer-input-wrap,
     body.mic-transcribing .send-btn,
@@ -168,13 +167,13 @@
     }
 
     body.mic-recording .top-header,
-    body.mic-recording .tier2-bar,
+    body.mic-recording .tier2-row,
     body.mic-recording .scroll-bottom-btn,
     body.mic-recording .plus-btn,
     body.mic-recording .send-btn,
     body.mic-recording .msg-footer,
     body.mic-transcribing .top-header,
-    body.mic-transcribing .tier2-bar,
+    body.mic-transcribing .tier2-row,
     body.mic-transcribing .scroll-bottom-btn,
     body.mic-transcribing .plus-btn,
     body.mic-transcribing .send-btn,
@@ -183,13 +182,11 @@
       transition: opacity 0.16s ease;
     }
 
-    /* During recording ONLY #btn-mic stays interactive & vivid */
     body.mic-recording #btn-mic {
       pointer-events: auto !important;
       opacity: 1 !important;
     }
 
-    /* During transcription ALL buttons INCLUDING #btn-mic are completely locked */
     body.mic-transcribing #btn-mic {
       pointer-events: none !important;
       cursor: default;
@@ -202,7 +199,7 @@
       width: 100%;
       height: 100%;
       height: 100dvh;
-      background-color: var(--bg-canvas);
+      background-color: var(--bg);
       color: var(--text-chat);
       font-family: var(--font-sans);
       font-size: 17px;
@@ -228,12 +225,13 @@
       touch-action: manipulation;
     }
 
-    /* Strictly >= 16px on every <input> and <textarea> so iOS Safari never zooms */
+    /* Strictly >= 16px on all inputs/textareas to prevent iOS Safari zoom */
     input {
       font-family: var(--font-sans);
       font-optical-sizing: auto;
       font-size: 16px !important;
-      color: var(--text-header);
+      color: var(--text-input);
+      caret-color: var(--text-input);
       background: transparent;
       border: none;
       outline: none;
@@ -243,6 +241,7 @@
     textarea {
       font-family: var(--font-sans);
       font-optical-sizing: auto;
+      font-size: 16px;
       color: var(--text-input);
       caret-color: var(--text-input);
       background: transparent;
@@ -251,7 +250,6 @@
       -webkit-font-smoothing: antialiased;
     }
 
-    /* Full-bleed on iPhone; centered 390px preview shell on desktop */
     .app-shell {
       position: fixed;
       top: 0;
@@ -260,7 +258,7 @@
       width: 100%;
       height: 100dvh;
       margin: 0 auto;
-      background-color: var(--bg-canvas);
+      background-color: var(--bg);
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -274,13 +272,13 @@
     }
 
     /* ==========================================================================
-       TOP HEADER — 2 ROWS, SEAMLESS #000000, NO BALANCE IN HEADER
+       1. SINGLE-ROW TOP HEADER (Menu | Centered Model+Level | New Chat)
        ========================================================================== */
     .top-header {
       position: relative;
       z-index: 30;
       flex-shrink: 0;
-      background-color: var(--bg-canvas);
+      background-color: var(--bg);
       padding: max(10px, var(--safe-top)) 12px 10px;
       display: flex;
       align-items: center;
@@ -288,7 +286,6 @@
       width: 100%;
     }
 
-    /* Pixel-identical 44x44 circular borderless gray buttons (#btn-menu & #btn-new-chat) */
     .hdr-circle-btn {
       width: 44px;
       height: 44px;
@@ -320,35 +317,24 @@
       stroke-linejoin: round;
     }
 
-    /* Center 2-row stack between Menu and New Chat */
     .header-center {
       flex: 1;
       min-width: 0;
-      margin: 0 10px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 5px;
-    }
-
-    /* Row 1: Centered Model + Thinking Level trigger (NO Balance in header) */
-    .hdr-row-1 {
+      margin: 0 8px;
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 100%;
-      min-width: 0;
     }
 
     .gemini-model-trigger {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 5px;
+      gap: 6px;
       max-width: 100%;
       min-width: 0;
-      padding: 2px 6px;
-      border-radius: 10px;
+      padding: 6px 10px;
+      border-radius: 12px;
       line-height: 1.2;
       overflow: hidden;
       white-space: nowrap;
@@ -360,10 +346,10 @@
     }
 
     .gmt-model {
-      font-size: 16px;
+      font-size: 18px;
       font-weight: 500;
       color: var(--text-header);
-      letter-spacing: -0.01em;
+      letter-spacing: -0.012em;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -371,17 +357,21 @@
     }
 
     .gmt-level {
-      font-size: 16px;
-      font-weight: 400;
+      font-size: 18px;
+      font-weight: 500;
       color: var(--text-level);
-      letter-spacing: -0.01em;
+      letter-spacing: -0.012em;
       white-space: nowrap;
       flex-shrink: 0;
     }
 
+    .gmt-level.hidden {
+      display: none;
+    }
+
     .gmt-chev {
-      width: 14px;
-      height: 14px;
+      width: 15px;
+      height: 15px;
       flex-shrink: 0;
       color: var(--text-chevron);
       stroke: currentColor;
@@ -397,87 +387,13 @@
       transform: rotate(180deg);
     }
 
-    /* Row 2: Stretched horizontally between Menu & New Chat (TTS left, STT right) */
-    .hdr-row-2 {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      width: 100%;
-      min-width: 0;
-      line-height: 1.2;
-    }
-
-    .meta-trigger {
-      flex: 1;
-      min-width: 0;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 13.5px;
-      font-weight: 400;
-      line-height: 1.2;
-      color: var(--text-row2);
-      padding: 1px 0;
-      transition: color 0.12s ease;
-    }
-
-    .meta-trigger.stt-trigger {
-      justify-content: flex-end;
-    }
-
-    .meta-trigger:active,
-    .meta-trigger.open {
-      color: var(--text-bright);
-    }
-
-    .meta-trigger .row2-ico {
-      width: 13.5px;
-      height: 13.5px;
-      flex-shrink: 0;
-      stroke: currentColor;
-      fill: none;
-      stroke-width: 1.85;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-    }
-
-    .meta-trigger .lbl {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .meta-trigger .chev {
-      width: 10px;
-      height: 10px;
-      flex-shrink: 0;
-      stroke: currentColor;
-      fill: none;
-      stroke-width: 2.1;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-      opacity: 0.78;
-      transition: transform 0.16s ease;
-    }
-
-    .meta-trigger.open .chev {
-      transform: rotate(180deg);
-    }
-
-    @media (max-width: 375px) {
-      .gmt-model, .gmt-level { font-size: 15px; }
-      .meta-trigger { font-size: 12.5px; }
-    }
-
     /* ==========================================================================
-       FLAT BORDERLESS POPOVERS (#1e1f24) — MODEL, TTS, STT, VOICE, STATS, INFO
+       2. BORDERLESS POPOVERS & CENTER MODEL DROPDOWN (FIX #1a & #1b)
        ========================================================================== */
     .popover-backdrop {
       position: fixed;
       inset: 0;
-      z-index: 55;
+      z-index: 58;
       background: rgba(0, 0, 0, 0.42);
       opacity: 0;
       pointer-events: none;
@@ -492,41 +408,47 @@
     .popover-menu {
       position: absolute;
       z-index: 60;
-      min-width: 236px;
+      min-width: 224px;
       max-width: calc(100% - 20px);
-      max-height: 68vh;
+      max-height: 62dvh;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
-      background: var(--bg-popover);
+      background: var(--menu-bg);
       border-radius: var(--radius-popover);
       box-shadow: 0 18px 44px rgba(0, 0, 0, 0.84);
       padding: 6px;
       opacity: 0;
-      transform: translateY(-6px) scale(0.97);
+      transform: translate3d(0, -6px, 0) scale(0.97);
+      will-change: transform, opacity;
+      -webkit-backface-visibility: hidden;
+      backface-visibility: hidden;
       pointer-events: none;
       transition: opacity 0.15s ease, transform 0.15s ease;
     }
 
     .popover-menu.drop-up {
-      transform: translateY(6px) scale(0.97);
+      transform: translate3d(0, 6px, 0) scale(0.97);
     }
 
     .popover-menu.open {
       opacity: 1;
-      transform: translateY(0) scale(1);
+      transform: translate3d(0, 0, 0) scale(1);
       pointer-events: auto;
     }
 
+    /* FIX #1a: Full viewport-aware height so 5 models + Thinking + Flex never clip */
     .popover-menu.gemini-model-menu {
       width: 268px;
       min-width: 268px;
-      padding: 6px;
+      max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 96px);
+      overflow-y: auto;
       overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      border-radius: 18px;
+      padding: 8px;
     }
 
     .popover-menu.selector-menu {
-      width: 256px;
-      min-width: 244px;
       padding: 6px;
       overflow-x: hidden;
     }
@@ -537,38 +459,46 @@
       gap: 2px;
     }
 
-    .mdd-item {
+    .model-opt {
       width: 100%;
-      padding: 11px 12px;
-      border-radius: 12px;
+      height: var(--menu-item-h);
+      min-height: var(--menu-item-h);
+      padding: 0 12px;
+      border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
       font-family: var(--font-sans);
-      font-size: 15px;
+      font-size: var(--menu-font-size);
       font-weight: 400;
       line-height: 1.25;
-      color: var(--text-header);
+      color: var(--menu-text);
       background-color: transparent;
       text-align: left;
       transition: background-color 0.12s ease, color 0.12s ease;
     }
 
-    .mdd-item span:first-child {
+    /* Compact 42px model rows inside the center model dropdown */
+    .gemini-model-menu .model-opt {
+      height: 42px;
+      min-height: 42px;
+    }
+
+    .model-opt span:first-child {
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    .mdd-item:active {
+    .model-opt:active {
       background-color: var(--bg-surface-hover);
     }
 
-    .mdd-item.selected {
-      background-color: var(--bg-surface-elev);
-      color: var(--text-header);
+    .model-opt.selected {
+      background-color: var(--surface-composer);
+      color: var(--menu-active-text);
       font-weight: 500;
     }
 
@@ -576,38 +506,44 @@
       width: 17px;
       height: 17px;
       flex-shrink: 0;
-      color: var(--text-header);
+      color: var(--menu-active-text);
       opacity: 0;
     }
 
-    .mdd-item.selected .mdd-check {
+    .model-opt.selected .mdd-check {
       opacity: 1;
     }
 
-    .mdd-gap {
-      height: 4px;
-      flex-shrink: 0;
+    /* FIX #1b: Unified #15161a container wrapping Thinking title AND its options */
+    .mdd-thinking-group {
+      background-color: var(--menu-dark);
+      border-radius: 12px;
+      margin: 4px 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
 
-    /* Thinking level toggle row with exact 18x18 chevron slot */
     .mdd-thinking-btn {
       width: 100%;
-      padding: 11px 12px;
+      height: 40px;
+      min-height: 40px;
+      padding: 0 12px;
       border-radius: 12px;
       display: flex;
       align-items: center;
       gap: 8px;
-      font-size: 15px;
+      font-size: var(--menu-font-size);
       font-weight: 400;
       line-height: 1.25;
-      color: var(--text-header);
+      color: var(--menu-text);
       background-color: transparent;
       text-align: left;
       transition: background-color 0.12s ease;
     }
 
     .mdd-thinking-btn:active {
-      background-color: var(--bg-surface-hover);
+      background-color: rgba(255, 255, 255, 0.05);
     }
 
     .mdd-thinking-chev {
@@ -641,10 +577,7 @@
       color: var(--text-level);
     }
 
-    /* CRITICAL COLLAPSE FIX:
-       Zero vertical padding/margin on collapsed wrapper + inner 0fr item,
-       visibility: hidden + opacity: 0 when closed so selected 'None' (#2e3038)
-       NEVER leaks even 1px above Flex. Expanded group uses darker #15161a. */
+    /* Zero-bleed collapsed options grid (padding: 0, visibility: hidden, opacity: 0) */
     .mdd-thinking-panel {
       display: grid;
       grid-template-rows: 0fr;
@@ -656,20 +589,17 @@
       pointer-events: none;
       transition:
         grid-template-rows 0.18s cubic-bezier(0.22, 1, 0.36, 1),
-        margin 0.18s cubic-bezier(0.22, 1, 0.36, 1),
         opacity 0.14s ease,
         visibility 0s linear 0.18s;
     }
 
     .mdd-thinking-panel.expanded {
       grid-template-rows: 1fr;
-      margin: 2px 0 4px;
       opacity: 1;
       visibility: visible;
       pointer-events: auto;
       transition:
         grid-template-rows 0.18s cubic-bezier(0.22, 1, 0.36, 1),
-        margin 0.18s cubic-bezier(0.22, 1, 0.36, 1),
         opacity 0.14s ease,
         visibility 0s linear 0s;
     }
@@ -679,12 +609,10 @@
       min-height: 0;
       padding: 0;
       margin: 0;
-      background-color: var(--bg-thinking-group);
-      border-radius: 10px;
     }
 
     .mdd-thinking-list {
-      padding: 4px;
+      padding: 0 4px 4px;
       display: flex;
       flex-direction: column;
       gap: 2px;
@@ -692,13 +620,15 @@
 
     .mdd-think-opt {
       width: 100%;
-      padding: 9px 10px 9px 32px;
+      height: 36px;
+      min-height: 36px;
+      padding: 0 10px 0 34px;
       border-radius: 9px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       font-size: 14.5px;
-      color: var(--text-row2);
+      color: var(--menu-text);
       background-color: transparent;
       text-align: left;
       transition: background-color 0.12s ease, color 0.12s ease;
@@ -709,8 +639,8 @@
     }
 
     .mdd-think-opt.selected {
-      background-color: var(--bg-surface-elev);
-      color: var(--text-header);
+      background-color: var(--surface-composer);
+      color: var(--menu-active-text);
       font-weight: 500;
     }
 
@@ -723,23 +653,53 @@
       opacity: 1;
     }
 
-    /* Flex row directly on #1e1f24 background (NO dark box behind it) */
+    /* Flat Flex row directly on #1e1f24 below the Thinking container */
     .mdd-flex-item {
       width: 100%;
-      padding: 11px 12px;
-      border-radius: 12px;
+      height: 42px;
+      min-height: 42px;
+      padding: 0 12px;
+      border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
       font-family: var(--font-sans);
-      font-size: 15px;
+      font-size: var(--menu-font-size);
       font-weight: 400;
       line-height: 1.25;
       background-color: transparent;
-      color: var(--text-header);
+      color: var(--menu-text);
       text-align: left;
       transition: background-color 0.12s ease, color 0.12s ease;
+    }
+
+    .mdd-flex-left {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .mdd-flex-icon {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: currentColor;
+      opacity: 0.85;
+    }
+
+    .mdd-flex-icon svg {
+      width: 14px;
+      height: 14px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
     .mdd-flex-item:active {
@@ -747,8 +707,8 @@
     }
 
     .mdd-flex-item.is-on {
-      background-color: var(--bg-surface-elev);
-      color: var(--text-header);
+      background-color: var(--surface-composer);
+      color: var(--menu-active-text);
       font-weight: 500;
     }
 
@@ -791,128 +751,24 @@
       color: var(--text-level);
       padding: 6px 8px;
       border-radius: 8px;
-      background-color: var(--bg-popover-sub);
+      background-color: var(--menu-dark);
       white-space: nowrap;
     }
 
     .info-pop-model strong {
-      color: var(--text-header);
+      color: var(--menu-active-text);
       font-weight: 500;
-    }
-
-    /* Upward Balance Breakdown Popover */
-    .stats-card {
-      padding: 8px 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      width: 280px;
-      max-width: 100%;
-    }
-
-    .stats-top-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-    }
-
-    .stats-balance-val {
-      font-size: 20px;
-      font-weight: 500;
-      color: var(--text-bright);
-      font-variant-numeric: tabular-nums;
-    }
-
-    .stats-balance-lbl {
-      font-size: 12px;
-      color: var(--text-level);
-    }
-
-    .stats-limit-wrap {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
-
-    .stats-limit-head {
-      display: flex;
-      justify-content: space-between;
-      font-size: 12px;
-      color: var(--text-level);
-      font-variant-numeric: tabular-nums;
-    }
-
-    .stats-progress-track {
-      width: 100%;
-      height: 5px;
-      border-radius: var(--radius-pill);
-      background: var(--bg-surface-elev);
-      overflow: hidden;
-    }
-
-    .stats-progress-fill {
-      height: 100%;
-      background: var(--text-header);
-      border-radius: var(--radius-pill);
-    }
-
-    .stats-quota-box {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 9px 11px;
-      background: var(--bg-surface-elev);
-      border-radius: 12px;
-      font-size: 13px;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .stats-table {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      padding: 10px 11px;
-      border-radius: 12px;
-      background: var(--bg-popover-sub);
-      font-size: 13px;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .stats-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .stats-row-name {
-      color: var(--text-header);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .stats-row-sub {
-      color: var(--text-level);
-      font-size: 12px;
-    }
-
-    .stats-row-val {
-      color: var(--text-header);
-      font-weight: 500;
-      white-space: nowrap;
-      flex-shrink: 0;
     }
 
     /* ==========================================================================
-       CHAT FEED (#000000, 17px #d3d5d9, SCROLLS UNDER FLOATING BOTTOM DOCK)
+       3. CHAT FEED & USER CARD (FIX #3: #1e1f24 USER CARD)
        ========================================================================== */
     .chat-feed {
       flex: 1;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
-      background-color: var(--bg-canvas);
-      padding: 8px 16px 220px;
+      background-color: var(--bg);
+      padding: 8px 16px 205px;
       display: flex;
       flex-direction: column;
       gap: 20px;
@@ -942,21 +798,20 @@
       width: 100%;
     }
 
-    /* User Card: right-aligned, max-width 88%, #151618, 20px radius */
-    .user-card {
+    /* FIX #3: User message card matches previous Tier-2 surface (#1e1f24) */
+    .msg-user-card {
       align-self: flex-end;
       max-width: 88%;
-      background-color: var(--bg-user-card);
+      background-color: var(--menu-bg);
       border-radius: var(--radius-card);
-      padding: 12px 16px;
+      padding: 13px 16px;
       transition: background-color 0.14s ease;
     }
 
-    .user-card.collapsed {
+    .msg-user-card.collapsed {
       cursor: pointer;
     }
 
-    /* Gemini iOS Body Typography (.msg-body) */
     .msg-body {
       font-family: var(--font-sans);
       font-size: 17px;
@@ -969,7 +824,7 @@
       word-break: break-word;
     }
 
-    .user-card .msg-body {
+    .msg-user-card .msg-body {
       white-space: pre-wrap;
     }
 
@@ -995,7 +850,6 @@
       font-weight: 500;
     }
 
-    /* Inline code chips: Google Sans Code 15px, #1e1f20, #c4c7c5, 6px radius */
     .msg-body code {
       font-family: var(--font-mono);
       font-size: 15px;
@@ -1007,24 +861,25 @@
       font-variation-settings: normal;
     }
 
-    /* 3-Line Collapse with Surface-Matched Bottom Fade Mask */
     .clamped {
       position: relative;
       max-height: calc(17px * 1.52 * 3);
       overflow: hidden;
     }
 
-    .user-card .clamped::after {
+    /* Smooth bottom fade into #1e1f24 for collapsed user cards */
+    .msg-user-card .clamped::after {
       content: "";
       position: absolute;
       left: 0;
       right: 0;
       bottom: 0;
       height: 1.75em;
-      background: linear-gradient(180deg, rgba(21, 22, 24, 0) 0%, #151618 92%);
+      background: linear-gradient(180deg, rgba(30, 31, 36, 0) 0%, #1e1f24 92%);
       pointer-events: none;
     }
 
+    /* Smooth bottom fade into #000000 for collapsed AI responses */
     .ai-content.clamped::after {
       content: "";
       position: absolute;
@@ -1036,7 +891,7 @@
       pointer-events: none;
     }
 
-    /* LIVE-ONLY Gemini 3-Dot Orbital Thinking Indicator (14px, #a8abb0) */
+    /* LIVE-ONLY Gemini 3-Dot Orbital Thinking Spinner */
     .live-thinking-row {
       display: flex;
       align-items: center;
@@ -1061,23 +916,9 @@
       animation: dotPulse 1.2s ease-in-out infinite;
     }
 
-    .gemini-dot-spinner span:nth-child(1) {
-      top: 1px;
-      left: 7px;
-      animation-delay: 0s;
-    }
-
-    .gemini-dot-spinner span:nth-child(2) {
-      bottom: 2px;
-      left: 2px;
-      animation-delay: 0.4s;
-    }
-
-    .gemini-dot-spinner span:nth-child(3) {
-      bottom: 2px;
-      right: 2px;
-      animation-delay: 0.8s;
-    }
+    .gemini-dot-spinner span:nth-child(1) { top: 1px; left: 7px; animation-delay: 0s; }
+    .gemini-dot-spinner span:nth-child(2) { bottom: 2px; left: 2px; animation-delay: 0.4s; }
+    .gemini-dot-spinner span:nth-child(3) { bottom: 2px; right: 2px; animation-delay: 0.8s; }
 
     @keyframes orbitSpin {
       0% { transform: rotate(0deg); }
@@ -1118,8 +959,7 @@
       51%, 100% { opacity: 0.15; }
     }
 
-    /* Unified Right-Aligned 5-Icon Dim Message Footer (#58585e, NO inline timestamp)
-       Exact order: Copy -> Delete -> Speak -> ••• -> Collapse */
+    /* Unified Right-Aligned 5-Icon Dim Footer (Copy -> Delete -> Speak -> ••• -> Collapse) */
     .msg-footer {
       display: flex;
       align-items: center;
@@ -1183,18 +1023,33 @@
     }
 
     /* ==========================================================================
-       TRANSPARENT FLOATING BOTTOM DOCK + SCROLL-TO-BOTTOM + TIER-2 + COMPOSER
+       4. TRANSPARENT FLOATING BOTTOM DOCK & DECOUPLED PANEL LAYERS
        ========================================================================== */
+    .dock-scrim {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      background: rgba(0, 0, 0, 0.38);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+
+    .dock-scrim.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
     .bottom-dock {
       position: fixed;
       left: 0;
       right: 0;
       bottom: 0;
-      z-index: 40;
+      z-index: 50;
       background: transparent;
       pointer-events: none;
       padding-top: 4px;
-      padding-bottom: calc(max(22px, env(safe-area-inset-bottom)) + 14px);
+      padding-bottom: calc(max(24px, env(safe-area-inset-bottom)) + 16px);
       display: flex;
       flex-direction: column;
     }
@@ -1206,7 +1061,7 @@
       }
     }
 
-    /* Centered 38x38 Borderless Circular Scroll-to-Bottom Button */
+    /* Centered 38x38 Circular Scroll-to-Bottom Button */
     .scroll-bottom-btn {
       position: absolute;
       bottom: calc(100% + 10px);
@@ -1247,107 +1102,386 @@
       stroke-linejoin: round;
     }
 
-    /* Slide-up Voice Settings Panel (borderless #22242b) */
-    .voice-dock {
-      display: none;
-      pointer-events: auto;
-      margin: 0 12px 10px;
-      background-color: var(--bg-voice-panel);
-      border-radius: 22px;
-      padding: 12px;
-      flex-direction: column;
-      gap: 11px;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.78);
-      animation: slideUpFade 0.16s ease;
-    }
-
-    .voice-dock.open {
-      display: flex;
-    }
-
-    @keyframes slideUpFade {
-      from { opacity: 0; transform: translateY(6px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* Top row: 4 equal-width Voice 1..4 buttons + Save */
-    .vp-presets-row {
+    /* ==========================================================================
+       4A. TIER-2 ROW (FIX #2: #2e3038 OFF / #cfd2da + #121316 ACTIVE, ZERO FLICKER)
+       ========================================================================== */
+    .tier2-row {
       display: flex;
       align-items: center;
       gap: 6px;
+      padding: 0 10px;
+      margin-bottom: 10px;
       width: 100%;
+      pointer-events: none;
+      transform: translate3d(0, 0, 0);
+      -webkit-backface-visibility: hidden;
+      backface-visibility: hidden;
+      contain: layout style;
     }
 
-    .vp-preset-btn {
-      flex: 1;
-      min-width: 0;
-      height: 33px;
-      padding: 0 4px;
-      border-radius: var(--radius-pill);
-      background-color: var(--bg-voice-btn);
-      font-size: 12px;
-      font-weight: 500;
-      color: #c8ccd4;
-      white-space: nowrap;
-      transition: background-color 0.14s ease, color 0.14s ease, transform 0.1s ease;
-    }
-
-    .vp-preset-btn:active {
-      transform: scale(0.96);
-    }
-
-    .vp-preset-btn.active {
-      background-color: var(--pill-light-bg);
-      color: var(--pill-light-text);
-      font-weight: 600;
-    }
-
-    .vp-save-btn {
-      flex-shrink: 0;
-      height: 33px;
-      padding: 0 13px;
-      border-radius: var(--radius-pill);
-      background-color: var(--bg-voice-btn-elev);
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--text-header);
-      white-space: nowrap;
-      transition: background-color 0.14s ease, color 0.14s ease;
-    }
-
-    .vp-save-btn:active {
-      background-color: var(--bg-composer-btn-active);
-    }
-
-    .vp-save-btn.saved {
-      background-color: var(--pill-light-bg);
-      color: var(--pill-light-text);
-    }
-
-    /* Middle row: "Голос:" + custom non-zooming upward popover */
-    .vp-voice-row {
-      display: flex;
+    .tier2-btn {
+      pointer-events: auto;
+      height: var(--menu-item-h);
+      min-height: var(--menu-item-h);
+      padding: 0 11px;
+      border-radius: 9999px;
+      background-color: var(--surface-composer);
+      color: var(--menu-text);
+      font-family: var(--font-sans);
+      font-size: var(--menu-font-size);
+      font-weight: 400;
+      line-height: 1;
+      letter-spacing: -0.008em;
+      display: inline-flex;
       align-items: center;
+      justify-content: center;
+      gap: 4px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.52);
+      -webkit-tap-highlight-color: transparent;
+      transition: background-color 0.12s ease, color 0.12s ease;
+    }
+
+    /* Pressed / active Tier-2 pills use IDENTICAL Save button colors (#cfd2da / #121316) */
+    .tier2-btn.is-active {
+      background-color: var(--save-bg);
+      color: var(--save-fg);
+      font-weight: 500;
+    }
+
+    /* Zero-height bold width reservation prevents horizontal micro-shift on 400 -> 500 */
+    .t2-text {
+      display: inline-block;
+      line-height: 1.1;
+      text-align: center;
+    }
+
+    .t2-text::after {
+      content: attr(data-label);
+      font-weight: 500;
+      height: 0;
+      overflow: hidden;
+      visibility: hidden;
+      display: block;
+      pointer-events: none;
+    }
+
+    .t2-balance {
+      margin-right: auto;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .t2-balance svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.85;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .t2-persona {
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .t2-persona .t2-text {
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .t2-audio {
+      gap: 3px;
+    }
+
+    .t2-audio svg {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.85;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .t2-audio-slash {
+      opacity: 0.45;
+      font-weight: 400;
+      line-height: 1;
+      margin: 0 1px;
+    }
+
+    .t2-autotts {
+      flex-shrink: 0;
+    }
+
+    @media (max-width: 380px) {
+      .tier2-row {
+        padding: 0 8px;
+        gap: 5px;
+      }
+      .tier2-btn {
+        padding: 0 9.5px;
+      }
+    }
+
+    /* ==========================================================================
+       4B & 4C. DECOUPLED FLOATING OVERLAY PANELS LAYER (z-index: 55)
+       ========================================================================== */
+    .floating-panels-layer {
+      position: fixed;
+      left: 0;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      z-index: 55;
+      pointer-events: none;
+      --panels-bottom: 166px;
+    }
+
+    @media (min-width: 520px) {
+      .floating-panels-layer {
+        max-width: 390px;
+        margin: 0 auto;
+      }
+    }
+
+    .slide-panel {
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: var(--panels-bottom);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background-color: var(--menu-bg);
+      border-radius: 20px;
+      padding: 12px;
+      box-shadow: 0 18px 44px rgba(0, 0, 0, 0.84);
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translate3d(0, 8px, 0);
+      will-change: transform, opacity;
+      -webkit-backface-visibility: hidden;
+      backface-visibility: hidden;
+      transition:
+        opacity 0.16s ease,
+        transform 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        visibility 0s linear 0.18s;
+    }
+
+    .slide-panel.open {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transform: translate3d(0, 0, 0);
+      transition:
+        opacity 0.16s ease,
+        transform 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        visibility 0s linear 0s;
+    }
+
+    .slide-panel.stats-panel {
+      right: auto;
+      width: 286px;
+      max-width: calc(100% - 20px);
+      padding: 12px 14px;
+    }
+
+    .stats-card {
+      display: flex;
+      flex-direction: column;
       gap: 10px;
       width: 100%;
     }
 
-    .vp-voice-label {
-      font-size: 13px;
+    .stats-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .stats-balance-val {
+      font-size: 20px;
       font-weight: 500;
-      color: #b4b9c2;
+      color: var(--text-bright);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stats-balance-lbl {
+      font-size: 12px;
+      color: var(--text-level);
+    }
+
+    .stats-limit-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .stats-limit-head {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-level);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stats-progress-track {
+      width: 100%;
+      height: 5px;
+      border-radius: var(--radius-pill);
+      background: var(--surface-composer);
+      overflow: hidden;
+    }
+
+    .stats-progress-fill {
+      height: 100%;
+      background: var(--text-header);
+      border-radius: var(--radius-pill);
+    }
+
+    .stats-quota-box {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 9px 11px;
+      background: var(--surface-composer);
+      border-radius: 12px;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stats-table {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 11px;
+      border-radius: 12px;
+      background: var(--menu-dark);
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stats-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .stats-row-name {
+      color: var(--text-header);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stats-row-sub {
+      color: var(--text-level);
+      font-size: 12px;
+    }
+
+    .stats-row-val {
+      color: var(--text-header);
+      font-weight: 500;
+      white-space: nowrap;
       flex-shrink: 0;
     }
 
-    .vp-voice-select {
+    /* Preset Row: 4 equal-width buttons + Save */
+    .panel-presets-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      width: 100%;
+    }
+
+    .panel-preset-btn {
       flex: 1;
-      height: 36px;
-      padding: 0 12px;
-      border-radius: 12px;
-      background-color: var(--bg-voice-btn);
-      color: var(--text-header);
-      font-size: 14px;
+      min-width: 0;
+      height: 34px;
+      padding: 0 6px;
+      border-radius: var(--radius-pill);
+      background-color: var(--menu-dark);
+      font-size: 12.5px;
+      font-weight: 400;
+      color: var(--menu-text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: background-color 0.14s ease, color 0.14s ease, transform 0.1s ease;
+    }
+
+    .panel-preset-btn:active {
+      transform: scale(0.96);
+    }
+
+    .panel-preset-btn.active {
+      background-color: var(--surface-composer);
+      color: var(--menu-active-text);
       font-weight: 500;
+    }
+
+    /* Shared Save Button Styling (#cfd2da / #121316) matching pressed Tier-2 pills */
+    .save-btn {
+      flex-shrink: 0;
+      height: 34px;
+      padding: 0 13px;
+      border-radius: var(--radius-pill);
+      background-color: var(--save-bg);
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--save-fg);
+      white-space: nowrap;
+      transition: opacity 0.14s ease, transform 0.1s ease, background-color 0.14s ease;
+    }
+
+    .save-btn:active {
+      opacity: 0.85;
+      transform: scale(0.96);
+    }
+
+    .save-btn.saved {
+      background-color: #e6e8ee;
+      color: var(--save-fg);
+    }
+
+    .panel-field-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .panel-field-label {
+      width: 56px;
+      flex-shrink: 0;
+      font-size: 13.5px;
+      font-weight: 400;
+      color: var(--text-level);
+      white-space: nowrap;
+    }
+
+    .panel-select-btn {
+      flex: 1;
+      min-width: 0;
+      height: 38px;
+      padding: 0 12px;
+      border-radius: 11px;
+      background-color: var(--surface-composer);
+      color: var(--menu-active-text);
+      font-size: 14.5px;
+      font-weight: 400;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -1355,15 +1489,23 @@
       transition: background-color 0.14s ease;
     }
 
-    .vp-voice-select:active,
-    .vp-voice-select.open {
-      background-color: var(--bg-voice-btn-elev);
+    .panel-select-btn span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
-    .vp-voice-select .chev {
+    .panel-select-btn:active,
+    .panel-select-btn.open {
+      background-color: var(--composer-btn);
+    }
+
+    .panel-select-btn .chev {
       width: 14px;
       height: 14px;
-      stroke: #b4b9c2;
+      flex-shrink: 0;
+      stroke: var(--text-chevron);
       fill: none;
       stroke-width: 2.1;
       stroke-linecap: round;
@@ -1371,15 +1513,15 @@
       transition: transform 0.16s ease;
     }
 
-    .vp-voice-select.open .chev {
+    .panel-select-btn.open .chev {
       transform: rotate(180deg);
     }
 
-    /* Sliders: Speed & Pitch */
     .vp-sliders {
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 9px;
+      padding: 2px 0;
     }
 
     .slider-group {
@@ -1391,13 +1533,13 @@
     .slider-head {
       display: flex;
       justify-content: space-between;
-      font-size: 12px;
-      color: #b4b9c2;
+      font-size: 12.5px;
+      color: var(--text-level);
       font-variant-numeric: tabular-nums;
     }
 
     .slider-head strong {
-      color: var(--text-header);
+      color: var(--menu-active-text);
       font-weight: 500;
     }
 
@@ -1407,7 +1549,7 @@
       width: 100%;
       height: 4px;
       border-radius: var(--radius-pill);
-      background: #3d414b;
+      background: var(--surface-composer);
       outline: none;
     }
 
@@ -1417,117 +1559,122 @@
       width: 18px;
       height: 18px;
       border-radius: 50%;
-      background: var(--text-header);
+      background: var(--menu-active-text);
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
       cursor: pointer;
     }
 
-    /* ==========================================================================
-       TIER-2 BAR — EXACT 3 BUTTONS: Balance (Left) · Voice (Center) · Auto TTS (Right)
-       Unified typography (Google Sans, 12.5px, 400) & softly muted text (#9a9fa8)
-       ========================================================================== */
-    .tier2-bar {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
-      align-items: center;
-      gap: 6px;
-      padding: 0 12px 9px;
-      width: 100%;
-      pointer-events: none;
+    /* Darker STT & Morph Sub-Section (#15161a, 12px radius, 10px padding) */
+    .audio-sub-section {
+      background-color: var(--menu-dark);
+      border-radius: 12px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
 
-    .t2-pill {
-      pointer-events: auto;
-      height: 31px;
-      padding: 0 11px;
-      border-radius: var(--radius-pill);
-      background-color: var(--bg-tier2-pill);
-      -webkit-backdrop-filter: blur(16px);
-      backdrop-filter: blur(16px);
-      font-family: var(--font-sans);
-      font-size: 12.5px;
-      font-weight: 400;
-      line-height: 1.2;
-      letter-spacing: -0.005em;
-      color: var(--text-tier2);
+    .audio-sub-section .panel-select-btn {
+      background-color: var(--menu-bg);
+      height: 36px;
+    }
+
+    .audio-sub-section .panel-select-btn:active,
+    .audio-sub-section .panel-select-btn.open {
+      background-color: var(--surface-composer);
+    }
+
+    /* AI Persona Panel Inputs (#15161a, >= 16px) */
+    .persona-name-input {
+      flex: 1;
+      min-width: 0;
+      height: 40px;
+      padding: 0 12px;
+      border-radius: 11px;
+      background-color: var(--menu-dark);
+      color: var(--text-input);
+      caret-color: var(--text-input);
+      font-size: 16px !important;
+      line-height: 1.3;
+    }
+
+    .persona-name-input::placeholder {
+      color: var(--text-placeholder);
+    }
+
+    .persona-textarea-wrap {
+      position: relative;
+      width: 100%;
+      background-color: var(--menu-dark);
+      border-radius: 12px;
+    }
+
+    .persona-textarea {
+      width: 100%;
+      min-height: 112px;
+      max-height: 200px;
+      padding: 10px 34px 10px 12px;
+      background: transparent;
+      color: var(--text-input);
+      caret-color: var(--text-input);
+      font-size: 16px !important;
+      line-height: 1.44;
+      resize: none;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      display: block;
+    }
+
+    .persona-textarea::placeholder {
+      color: var(--text-placeholder);
+    }
+
+    .persona-clear-btn {
+      position: absolute;
+      right: 6px;
+      bottom: 6px;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--text-clear-x);
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 5px;
-      white-space: nowrap;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-      transition: background-color 0.14s ease, color 0.14s ease, transform 0.1s ease;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.14s ease, color 0.12s ease;
     }
 
-    .t2-pill:active {
-      transform: scale(0.97);
+    .persona-textarea-wrap.has-text .persona-clear-btn {
+      opacity: 1;
+      pointer-events: auto;
     }
 
-    .t2-pill.balance-pill {
-      justify-self: start;
-      font-variant-numeric: tabular-nums;
-      gap: 4px;
+    .persona-clear-btn:active {
+      color: var(--menu-active-text);
     }
 
-    .t2-pill.balance-pill svg {
+    .persona-clear-btn svg {
       width: 13px;
       height: 13px;
-      flex-shrink: 0;
       stroke: currentColor;
       fill: none;
-      stroke-width: 1.85;
+      stroke-width: 2.1;
       stroke-linecap: round;
       stroke-linejoin: round;
     }
 
-    .t2-pill.voice-pill {
-      justify-self: center;
-      max-width: 100%;
-      min-width: 0;
-    }
-
-    .t2-pill.voice-pill .lbl {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      min-width: 0;
-    }
-
-    .t2-pill.auto-tts-pill {
-      justify-self: end;
-    }
-
-    .t2-pill .dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: #6c717c;
-      flex-shrink: 0;
-      transition: background-color 0.14s ease;
-    }
-
-    .t2-pill.active,
-    .t2-pill.open {
-      background-color: var(--bg-tier2-pill-active);
-      color: var(--text-tier2-active);
-    }
-
-    .t2-pill.active .dot {
-      background-color: var(--text-tier2-active);
-    }
-
     /* ==========================================================================
-       +20% TALLER BRIGHTER BORDERLESS COMPOSER CAPSULE (72px, 50px BUTTONS)
+       4D. FLOATING COMPOSER CAPSULE (#2e3038, 50px #3e414c BUTTONS)
        ========================================================================== */
     .composer-capsule {
       pointer-events: auto;
-      margin: 0 12px;
+      margin: 0 10px;
       min-height: 72px;
       border-radius: 36px;
-      background: var(--bg-composer);
-      -webkit-backdrop-filter: blur(18px);
-      backdrop-filter: blur(18px);
-      box-shadow: 0 12px 34px rgba(0, 0, 0, 0.62);
+      background-color: var(--surface-composer);
+      box-shadow: 0 12px 34px rgba(0, 0, 0, 0.65);
       padding: 11px;
       display: grid;
       grid-template-columns: 50px minmax(0, 1fr) 50px 50px;
@@ -1570,13 +1717,12 @@
       align-items: flex-start;
     }
 
-    /* 50x50 circular #41454f buttons with 24x24 icons */
     .cap-btn {
       width: 50px;
       height: 50px;
       flex-shrink: 0;
       border-radius: 50%;
-      background-color: var(--bg-composer-btn);
+      background-color: var(--composer-btn);
       color: var(--text-btn-bright);
       display: inline-flex;
       align-items: center;
@@ -1585,7 +1731,7 @@
     }
 
     .cap-btn:active {
-      background-color: var(--bg-composer-btn-active);
+      background-color: var(--composer-btn-active);
       transform: scale(0.92);
     }
 
@@ -1599,9 +1745,8 @@
       stroke-linejoin: round;
     }
 
-    /* Pulsing recording red #7a292e while recording */
     .cap-btn.mic-btn.recording {
-      background-color: var(--bg-mic-rec);
+      background-color: var(--mic-rec-bg);
       color: var(--text-bright);
       box-shadow: 0 0 0 3px rgba(240, 93, 98, 0.28);
       animation: micPulseRed 1.15s ease-in-out infinite;
@@ -1612,9 +1757,8 @@
       50% { box-shadow: 0 0 0 6px rgba(240, 93, 98, 0.46); }
     }
 
-    /* Spinner state while transcribing */
     .cap-btn.mic-btn.transcribing {
-      background-color: var(--bg-mic-transcribing);
+      background-color: var(--mic-transcribing-bg);
       color: var(--text-header);
     }
 
@@ -1625,16 +1769,15 @@
     }
 
     .cap-btn.send-btn.ready {
-      background-color: var(--bg-send-ready);
+      background-color: var(--send-ready-bg);
       color: var(--text-bright);
     }
 
     .cap-btn.send-btn.streaming {
-      background-color: var(--bg-send-stop);
+      background-color: var(--send-stop-bg);
       color: var(--text-bright);
     }
 
-    /* Single persistent 18px <textarea> (#c8cbd0 text/caret, #7a7e86 placeholder) */
     .chat-textarea {
       width: 100%;
       font-size: 18px !important;
@@ -1657,7 +1800,6 @@
       -webkit-overflow-scrolling: touch;
     }
 
-    /* Reserve right padding when clear × button is visible */
     .composer-input-wrap.has-text .chat-textarea {
       padding-right: 28px;
     }
@@ -1666,7 +1808,6 @@
       color: var(--text-placeholder);
     }
 
-    /* Clear × button (24x24, #848891) */
     .clear-input-btn {
       position: absolute;
       right: 2px;
@@ -1711,7 +1852,6 @@
       stroke-linejoin: round;
     }
 
-    /* Recording / Transcribing inline status inside composer */
     .mic-status-bar {
       display: none;
       align-items: center;
@@ -1750,7 +1890,7 @@
     }
 
     /* ==========================================================================
-       LEFT SIDE DRAWER (BORDERLESS #111113, NO BOTTOM FOOTER)
+       5. LEFT DRAWER (#111113, ZERO BORDERS, NO BOTTOM FOOTER)
        ========================================================================== */
     .drawer-backdrop {
       position: fixed;
@@ -1775,7 +1915,7 @@
       bottom: 0;
       left: 0;
       z-index: 80;
-      width: min(86vw, 330px);
+      width: min(84vw, 330px);
       background-color: var(--bg-drawer);
       box-shadow: 16px 0 48px rgba(0, 0, 0, 0.78);
       transform: translateX(-104%);
@@ -1820,7 +1960,6 @@
       background: var(--bg-drawer-plaque);
     }
 
-    /* Exact 44x44 borderless close button */
     .drawer-close-btn {
       width: 44px;
       height: 44px;
@@ -1859,7 +1998,7 @@
       gap: 12px;
     }
 
-    /* Provider Segmented Switch */
+    /* Silent Segmented Switch: OpenRouter | Direct / Custom */
     .segmented-ctrl {
       flex-shrink: 0;
       background-color: var(--bg-drawer-plaque);
@@ -1884,7 +2023,7 @@
       color: var(--text-header);
     }
 
-    /* Collapsible API Keys Accordion (flex-shrink: 0, 0fr -> 1fr, zero clipping) */
+    /* Collapsible Unclipped API Keys Accordion */
     .drawer-section-card {
       flex-shrink: 0;
       background-color: var(--bg-drawer-plaque);
@@ -1975,7 +2114,7 @@
       flex-shrink: 0;
     }
 
-    /* Chat History Section + Compact Dual-Zone Scrollable List (75dvh) */
+    /* Chat History + Dual-Zone Scroll (75dvh) */
     .chat-list-section {
       flex-shrink: 0;
       display: flex;
@@ -2089,17 +2228,9 @@
       transition: background-color 0.14s ease;
     }
 
-    .chat-item.active {
-      background-color: var(--bg-drawer-row-active);
-    }
-
-    .chat-item.selected {
-      background-color: var(--bg-drawer-row-selected);
-    }
-
-    .chat-item.context-highlight {
-      background-color: var(--bg-drawer-row-ctx);
-    }
+    .chat-item.active { background-color: var(--bg-drawer-row-active); }
+    .chat-item.selected { background-color: var(--bg-drawer-row-selected); }
+    .chat-item.context-highlight { background-color: var(--bg-drawer-row-ctx); }
 
     .chat-item-main {
       flex: 1;
@@ -2113,45 +2244,41 @@
       touch-action: pan-y;
     }
 
-    .chat-item-main:active {
-      opacity: 0.78;
-    }
+    .chat-item-main:active { opacity: 0.78; }
 
-    .chat-item-title {
-      font-size: 14px;
+    .chat-title {
+      font-family: 'Google Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 15px;
       line-height: 1.28;
       font-weight: 500;
-      color: var(--text-header);
+      letter-spacing: -0.008em;
+      color: #f1f3f6;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-    }
-
-    .chat-item.active .chat-item-title {
-      color: var(--text-bright);
     }
 
     .chat-item-meta {
-      font-size: 11px;
-      line-height: 1.2;
-      color: var(--text-sub);
+      font-size: 12px;
+      line-height: 1.25;
+      font-weight: 400;
+      color: var(--text-meta);
+      white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      white-space: nowrap;
     }
 
-    /* Inline Rename Input (16px strictly) */
     .chat-rename-input {
       width: 100%;
-      background-color: #2b2e36;
+      padding: 3px 8px;
       border-radius: 8px;
-      padding: 4px 8px;
-      color: var(--text-bright);
+      background-color: var(--bg-drawer-tab-active);
+      color: var(--menu-active-text);
+      font-size: 16px !important;
       line-height: 1.25;
       font-weight: 500;
     }
 
-    /* Tiny 11.5px pushpin SVG immediately to the left of select checkbox */
     .chat-pin-indicator {
       flex-shrink: 0;
       width: 18px;
@@ -2184,7 +2311,6 @@
       touch-action: none;
     }
 
-    /* Borderless 18x18 circular tonal checkbox */
     .ios-checkbox {
       width: 18px;
       height: 18px;
@@ -2291,9 +2417,7 @@
       transition: background-color 0.12s ease;
     }
 
-    .ctx-item:active {
-      background-color: var(--bg-surface-hover);
-    }
+    .ctx-item:active { background-color: var(--bg-surface-hover); }
 
     .ctx-item-left {
       display: inline-flex;
@@ -2345,7 +2469,7 @@
     .toast {
       position: fixed;
       left: 50%;
-      bottom: calc(max(22px, env(safe-area-inset-bottom)) + 146px);
+      bottom: calc(max(24px, env(safe-area-inset-bottom)) + 160px);
       transform: translateX(-50%) translateY(10px);
       z-index: 95;
       background-color: #282b33;
@@ -2373,10 +2497,9 @@
   <div class="app-shell" id="appShell">
 
     <!-- =====================================================================
-         1. TOP HEADER — 2 ROWS, SEAMLESS #000000, NO BALANCE IN HEADER
+         1. SINGLE-ROW TOP HEADER
          ===================================================================== -->
     <header class="top-header" id="topHeader">
-      <!-- Left: Exact 44x44 Circular Menu Button -->
       <button class="hdr-circle-btn" id="btn-menu" aria-label="Меню">
         <svg viewBox="0 0 24 24">
           <line x1="4" y1="9" x2="20" y2="9"></line>
@@ -2384,41 +2507,14 @@
         </svg>
       </button>
 
-      <!-- Center 2 Pure-Text Rows -->
       <div class="header-center">
-        <!-- Row 1: Centered Model + Thinking Level trigger -->
-        <div class="hdr-row-1">
-          <button class="gemini-model-trigger" id="modelDropdownBtn" data-popover="model" aria-label="Выбрать модель">
-            <span class="gmt-model" id="modelBtnLabel">4 Argon</span>
-            <span class="gmt-level" id="thinkingBtnLabel">High</span>
-            <svg class="gmt-chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
-          </button>
-        </div>
-
-        <!-- Row 2: Stretched Full-Width TTS & STT Names -->
-        <div class="hdr-row-2">
-          <button class="meta-trigger" id="ttsDropdownBtn" data-popover="tts" aria-label="Движок озвучки TTS">
-            <svg class="row2-ico" viewBox="0 0 24 24">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-            </svg>
-            <span class="lbl" id="ttsBtnLabel">Gemini 3.8 Flash-Lite TTS</span>
-            <svg class="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
-          </button>
-
-          <button class="meta-trigger stt-trigger" id="sttDropdownBtn" data-popover="stt" aria-label="Движок микрофона STT">
-            <svg class="row2-ico" viewBox="0 0 24 24">
-              <rect x="9" y="2" width="6" height="12" rx="3"></rect>
-              <path d="M5 10a7 7 0 0 0 14 0"></path>
-              <line x1="12" y1="19" x2="12" y2="22"></line>
-            </svg>
-            <span class="lbl" id="sttBtnLabel">Whisper Large v3</span>
-            <svg class="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
-          </button>
-        </div>
+        <button class="gemini-model-trigger" id="modelDropdownBtn" data-popover="model" aria-label="Выбрать модель">
+          <span class="gmt-model" id="modelBtnLabel">4 Argon</span>
+          <span class="gmt-level" id="thinkingBtnLabel">High</span>
+          <svg class="gmt-chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
       </div>
 
-      <!-- Right: Exact 44x44 Circular New Chat Button -->
       <button class="hdr-circle-btn" id="btn-new-chat" aria-label="Новый чат">
         <svg viewBox="0 0 24 24">
           <path d="M12 20h9"></path>
@@ -2428,15 +2524,18 @@
     </header>
 
     <!-- =====================================================================
-         2. CHAT FEED (#000000, SCROLLS CLEANLY UNDERNEATH FLOATING BOTTOM DOCK)
+         3. CHAT FEED (SEAMLESS #000000)
          ===================================================================== -->
     <main class="chat-feed" id="chatFeed"></main>
 
+    <!-- Click-outside scrim for bottom panels (z-index: 40, strictly BELOW .bottom-dock) -->
+    <div class="dock-scrim" id="dockScrim"></div>
+
     <!-- =====================================================================
-         3. TRANSPARENT FLOATING BOTTOM DOCK + SCROLL-TO-BOTTOM + TIER-2 + COMPOSER
+         4. TRANSPARENT FLOATING BOTTOM DOCK (z-index: 50)
          ===================================================================== -->
     <section class="bottom-dock" id="bottomDock">
-      <!-- Centered 38x38 Borderless Circular Scroll-to-Bottom Button -->
+      <!-- Centered 38x38 Scroll-to-Bottom Button -->
       <button class="scroll-bottom-btn" id="scrollBottomBtn" aria-label="Прокрутить вниз">
         <svg viewBox="0 0 24 24">
           <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -2444,65 +2543,41 @@
         </svg>
       </button>
 
-      <!-- Slide-up Voice Settings Panel (borderless #22242b) -->
-      <div class="voice-dock" id="voicePanel">
-        <div class="vp-presets-row" id="presetGroup">
-          <button class="vp-preset-btn active" data-preset="Voice 1">Voice 1</button>
-          <button class="vp-preset-btn" data-preset="Voice 2">Voice 2</button>
-          <button class="vp-preset-btn" data-preset="Voice 3">Voice 3</button>
-          <button class="vp-preset-btn" data-preset="Voice 4">Voice 4</button>
-          <button class="vp-save-btn" id="savePresetBtn">Save</button>
-        </div>
-
-        <div class="vp-voice-row">
-          <span class="vp-voice-label">Голос:</span>
-          <button class="vp-voice-select" id="voiceSelectBtn" data-popover="voice">
-            <span id="voiceSelectLabel">Puck</span>
-            <svg class="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
-          </button>
-        </div>
-
-        <div class="vp-sliders">
-          <div class="slider-group">
-            <div class="slider-head">
-              <span>Speed</span>
-              <strong id="speedVal">1.15x</strong>
-            </div>
-            <input type="range" class="mono-range" id="speedSlider" min="0.70" max="1.60" step="0.05" value="1.15">
-          </div>
-          <div class="slider-group">
-            <div class="slider-head">
-              <span>Pitch</span>
-              <strong id="pitchVal">1.00x</strong>
-            </div>
-            <input type="range" class="mono-range" id="pitchSlider" min="0.75" max="1.25" step="0.01" value="1.00">
-          </div>
-        </div>
-      </div>
-
-      <!-- TIER-2 BAR: EXACT 3 BUTTONS (Balance Left · Voice Center · Auto TTS Right) -->
-      <div class="tier2-bar">
-        <button class="t2-pill balance-pill" id="statsDropdownBtn" data-popover="stats" aria-label="Баланс и расходы">
+      <!-- 4A. TIER-2 ROW (44px, 9999px pill radius, #2e3038 off / #cfd2da active, zero flicker) -->
+      <div class="tier2-row" id="tier2Row">
+        <button class="tier2-btn t2-balance" id="statsDropdownBtn" aria-label="Баланс и расходы">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="12" cy="12" r="9"></circle>
             <path d="M14.8 9.2c-.5-.8-1.5-1.2-2.7-1.2-1.5 0-2.6.8-2.6 1.9 0 1.2 1 1.7 2.6 2 1.7.3 2.8.9 2.8 2.1 0 1.2-1.2 2-2.9 2-1.3 0-2.4-.5-3-1.3"></path>
             <line x1="12" y1="6.3" x2="12" y2="8"></line>
             <line x1="12" y1="16" x2="12" y2="17.7"></line>
           </svg>
-          <span id="balanceBtnVal">0.000$</span>
+          <span class="t2-text" id="balanceBtnVal" data-label="0.000$">0.000$</span>
         </button>
 
-        <button class="t2-pill voice-pill" id="voiceDockBtn" aria-label="Настройки голоса">
-          <span class="lbl" id="voiceDockLabel">Voice: Voice 1, Puck</span>
+        <button class="tier2-btn t2-persona" id="personaDockBtn" aria-label="AI Persona">
+          <span class="t2-text" id="personaDockLabel" data-label="AI Persona">AI Persona</span>
         </button>
 
-        <button class="t2-pill auto-tts-pill" id="autoTtsBtn" aria-pressed="false">
-          <span class="dot"></span>
-          <span>Auto TTS</span>
+        <button class="tier2-btn t2-audio" id="audioDockBtn" aria-label="Настройки озвучки и микрофона">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+          </svg>
+          <span class="t2-audio-slash" aria-hidden="true">/</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+            <path d="M5 10a7 7 0 0 0 14 0"></path>
+            <line x1="12" y1="19" x2="12" y2="22"></line>
+          </svg>
+        </button>
+
+        <button class="tier2-btn t2-autotts" id="autoTtsBtn" aria-pressed="false">
+          <span class="t2-text" data-label="Auto TTS">Auto TTS</span>
         </button>
       </div>
 
-      <!-- +20% Taller Brighter Borderless Composer Capsule (72px, 50px buttons) -->
+      <!-- 4D. FLOATING COMPOSER CAPSULE (#2e3038, 50px #3e414c buttons) -->
       <div class="composer-capsule" id="composerCapsule">
         <button class="cap-btn plus-btn" id="attachBtn" aria-label="Прикрепить">
           <svg viewBox="0 0 24 24">
@@ -2512,7 +2587,7 @@
         </button>
 
         <div class="composer-input-wrap" id="composerInputWrap">
-          <textarea class="chat-textarea" id="chatInput" rows="1" placeholder="Сообщение…"></textarea>
+          <textarea class="chat-textarea" id="chatInput" rows="1" placeholder="Сообщение..."></textarea>
           <button class="clear-input-btn" id="btn-clear-input" type="button" aria-label="Очистить поле ввода">
             <svg viewBox="0 0 24 24">
               <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -2534,7 +2609,7 @@
           </svg>
         </button>
 
-        <button class="cap-btn send-btn" id="sendBtn" aria-label="Отправить">
+        <button class="cap-btn send-btn" id="btn-send" aria-label="Отправить">
           <svg id="sendIconSvg" viewBox="0 0 24 24">
             <line x1="12" y1="19" x2="12" y2="5"></line>
             <polyline points="6 11 12 5 18 11"></polyline>
@@ -2544,7 +2619,113 @@
     </section>
 
     <!-- =====================================================================
-         4. LEFT SIDE DRAWER (BORDERLESS #111113, NO BOTTOM FOOTER)
+         DECOUPLED FLOATING OVERLAY PANELS LAYER (z-index: 55)
+         ===================================================================== -->
+    <div class="floating-panels-layer" id="floatingPanelsLayer">
+      <!-- Balance Breakdown Panel -->
+      <div class="slide-panel stats-panel" id="statsPanel" role="dialog" aria-label="Баланс и расходы"></div>
+
+      <!-- 4B. Audio (Voice & Mic) Panel (#1e1f24) -->
+      <div class="slide-panel" id="audioPanel" role="dialog" aria-label="Настройки озвучки и микрофона">
+        <div class="panel-presets-row" id="voicePresetGroup">
+          <button class="panel-preset-btn active" data-voice-preset="Voice 1">Voice 1</button>
+          <button class="panel-preset-btn" data-voice-preset="Voice 2">Voice 2</button>
+          <button class="panel-preset-btn" data-voice-preset="Voice 3">Voice 3</button>
+          <button class="panel-preset-btn" data-voice-preset="Voice 4">Voice 4</button>
+          <button class="save-btn" id="saveVoicePresetBtn">Save</button>
+        </div>
+
+        <div class="panel-field-row">
+          <span class="panel-field-label">TTS:</span>
+          <button class="panel-select-btn" id="ttsSelectBtn" data-popover="tts">
+            <span id="ttsSelectLabel">Gemini 3.8 Flash-Lite TTS</span>
+            <svg class="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+        </div>
+
+        <div class="panel-field-row">
+          <span class="panel-field-label">Voice:</span>
+          <button class="panel-select-btn" id="voiceSelectBtn" data-popover="voice">
+            <span id="voiceSelectLabel">Puck</span>
+            <svg class="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+        </div>
+
+        <div class="vp-sliders">
+          <div class="slider-group">
+            <div class="slider-head">
+              <span>Speed</span>
+              <strong id="speedVal">1.15x</strong>
+            </div>
+            <input type="range" class="mono-range" id="speedSlider" min="0.70" max="1.60" step="0.05" value="1.15">
+          </div>
+          <div class="slider-group">
+            <div class="slider-head">
+              <span>Pitch</span>
+              <strong id="pitchVal">1.00x</strong>
+            </div>
+            <input type="range" class="mono-range" id="pitchSlider" min="0.75" max="1.25" step="0.01" value="1.00">
+          </div>
+        </div>
+
+        <div class="audio-sub-section">
+          <div class="panel-field-row">
+            <span class="panel-field-label">STT:</span>
+            <button class="panel-select-btn" id="sttSelectBtn" data-popover="stt">
+              <span id="sttSelectLabel">Whisper Large v3</span>
+              <svg class="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+          </div>
+          <div class="panel-field-row">
+            <span class="panel-field-label">Morph:</span>
+            <button class="panel-select-btn" id="morphSelectBtn" data-popover="morph">
+              <span id="morphSelectLabel">Off</span>
+              <svg class="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4C. AI Persona Panel (#1e1f24) -->
+      <div class="slide-panel" id="personaPanel" role="dialog" aria-label="AI Persona">
+        <div class="panel-presets-row" id="personaPresetGroup">
+          <button class="panel-preset-btn active" data-persona-preset="0">Persona 1</button>
+          <button class="panel-preset-btn" data-persona-preset="1">Persona 2</button>
+          <button class="panel-preset-btn" data-persona-preset="2">Persona 3</button>
+          <button class="panel-preset-btn" data-persona-preset="3">Persona 4</button>
+          <button class="save-btn" id="savePersonaPresetBtn">Save</button>
+        </div>
+
+        <div class="panel-field-row">
+          <label class="panel-field-label" for="personaNameInput">Name:</label>
+          <input
+            type="text"
+            class="persona-name-input"
+            id="personaNameInput"
+            placeholder="AI Persona"
+            enterkeyhint="done"
+            autocomplete="off"
+          >
+        </div>
+
+        <div class="persona-textarea-wrap" id="personaTextareaWrap">
+          <textarea
+            class="persona-textarea"
+            id="personaInstructionsInput"
+            placeholder="System instructions..."
+          ></textarea>
+          <button class="persona-clear-btn" id="btn-clear-persona" type="button" aria-label="Очистить инструкции">
+            <svg viewBox="0 0 24 24">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         5. LEFT DRAWER (#111113, NO BOTTOM FOOTER)
          ===================================================================== -->
     <div class="drawer-backdrop" id="drawerBackdrop"></div>
     <aside class="drawer" id="drawer" aria-hidden="true">
@@ -2559,13 +2740,13 @@
       </div>
 
       <div class="drawer-content">
-        <!-- Borderless Provider Segmented Switch -->
+        <!-- Silent Segmented Switch: OpenRouter | Direct / Custom -->
         <div class="segmented-ctrl" id="providerSwitch">
           <button class="seg-btn active" data-provider="openrouter">OpenRouter</button>
           <button class="seg-btn" data-provider="direct">Direct / Custom</button>
         </div>
 
-        <!-- Collapsible API Keys Accordion (0fr -> 1fr, zero clipping) -->
+        <!-- Collapsible Unclipped API Keys Accordion -->
         <div class="drawer-section-card">
           <button class="accordion-trigger" id="apiAccordionBtn" aria-expanded="false">
             <span>API ключи</span>
@@ -2578,7 +2759,7 @@
                   <label class="field-label" for="orKeyInput">OpenRouter Key</label>
                   <div class="input-wrap">
                     <input type="password" id="orKeyInput" placeholder="sk-or-v1-..." autocomplete="off">
-                    <button class="eye-btn" data-toggle-pw="orKeyInput" aria-label="Показать ключ">
+                    <button class="eye-btn" data-toggle-pw="orKeyInput" aria-label="Показать OpenRouter Key">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                     </button>
                   </div>
@@ -2588,6 +2769,16 @@
                   <label class="field-label" for="customUrlInput">Custom Endpoint URL</label>
                   <div class="input-wrap">
                     <input type="url" id="customUrlInput" placeholder="https://api.example.com/v1" autocomplete="off">
+                  </div>
+                </div>
+
+                <div class="field-group">
+                  <label class="field-label" for="elevenKeyInput">ElevenLabs Key</label>
+                  <div class="input-wrap">
+                    <input type="password" id="elevenKeyInput" placeholder="sk_..." autocomplete="off">
+                    <button class="eye-btn" data-toggle-pw="elevenKeyInput" aria-label="Показать ElevenLabs Key">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2633,7 +2824,7 @@
     </aside>
 
     <!-- =====================================================================
-         BORDERLESS POPOVERS, LONG-PRESS CONTEXT MENU & TOAST
+         POPOVERS (z-index 58 / 60), LONG-PRESS CONTEXT MENU & TOAST
          ===================================================================== -->
     <div class="popover-backdrop" id="popoverBackdrop"></div>
     <div class="popover-menu" id="popoverMenu"></div>
@@ -2652,26 +2843,25 @@
          CONSTANTS & DEMO DATA
          ===================================================================== */
       const CHAT_MODELS = [
-        { id: 'google/gemini-4-argon', label: '4 Argon', flexSupported: true },
-        { id: 'google/gemini-4-hydrogen', label: '4 Hydrogen', flexSupported: true },
-        { id: 'google/gemini-3.8-flash', label: '3.8 Flash', flexSupported: true },
-        { id: 'google/gemini-3.5-flash-lite', label: '3.5 Flash-Lite', flexSupported: true },
-        { id: 'google/gemini-2.5-flash-lite', label: '2.5 Flash-Lite', flexSupported: false }
+        { id: 'google/gemini-4-argon', label: '4 Argon', supportsFlex: true },
+        { id: 'google/gemini-4-hydrogen', label: '4 Hydrogen', supportsFlex: true },
+        { id: 'google/gemini-3.8-flash', label: '3.8 Flash', supportsFlex: true },
+        { id: 'google/gemini-3.5-flash-lite', label: '3.5 Flash-Lite', supportsFlex: true },
+        { id: 'google/gemini-2.5-flash-lite', label: '2.5 Flash-Lite', supportsFlex: false }
       ];
 
-      // Ordered High -> None so 'None' is the bottom option (tests the collapse fix directly)
       const THINKING_LEVELS = [
-        { id: 'high', label: 'High' },
-        { id: 'medium', label: 'Medium' },
-        { id: 'low', label: 'Low' },
+        { id: 'none', label: 'None' },
         { id: 'minimal', label: 'Minimal' },
-        { id: 'none', label: 'None' }
+        { id: 'low', label: 'Low' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' }
       ];
 
       const TTS_MODELS = [
         { id: 'google/gemini-3.8-flash-lite-tts', name: 'Gemini 3.8 Flash-Lite TTS' },
         { id: 'google/gemini-3.8-flash-tts', name: 'Gemini 3.8 Flash TTS' },
-        { id: 'x-ai/grok-tts', name: 'Grok TTS' },
+        { id: 'x-ai/grok-voice-tts-1.0', name: 'Grok Voice TTS 1.0' },
         { id: 'elevenlabs-byok', name: 'ElevenLabs BYOK' }
       ];
 
@@ -2681,10 +2871,16 @@
         { id: 'google/gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash-Lite' }
       ];
 
+      const MORPH_MODES = [
+        { id: 'off', name: 'Off' },
+        { id: 'basic', name: 'Basic' },
+        { id: 'strong', name: 'Strong' }
+      ];
+
       const GEMINI_VOICES = [
-        'Puck', 'Charon', 'Kore', 'Fenrir',
-        'Aoede', 'Zephyr', 'Leda', 'Orus',
-        'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus'
+        'Puck', 'Zephyr', 'Aoede', 'Charon',
+        'Fenrir', 'Kore', 'Leda', 'Orus',
+        'Perseus', 'Callirrhoe', 'Autonoe', 'Enceladus'
       ];
 
       const THINKING_STEPS = [
@@ -2693,46 +2889,45 @@
         'Формирование ответа…'
       ];
 
-      // 14 compact Russian chats; primary demo chat has 4 messages with code chips & multi-paragraph reply
       const INITIAL_CHATS = [
         {
           id: 'chat-1',
-          title: 'Настройка PWA-интерфейса и блокировки MIC',
-          date: 'Сегодня · 08:05',
+          title: 'Фиксы Thinking, Tier-2 и карточки',
+          date: 'Сегодня · 16:12',
           pinned: false,
           order: 0,
           messages: [
             {
               id: 'm1',
               role: 'user',
-              timestamp: '08:01  •  25/11/26',
+              timestamp: '16:08  •  25/11/26',
               collapsed: false,
-              text: 'Убери просвет полоски под Thinking level при выборе None, перенеси баланс в нижний ряд к Voice и Auto TTS и сделай жёсткую блокировку всего интерфейса на время записи и транскрибации.'
+              text: 'Поправь три момента: при раскрытии Thinking кнопка Flex не должна пропадать, а заголовок Thinking должен быть на том же тёмном фоне #15161a. Второй ряд кнопок над вводом в отжатом виде сделай цвета поля ввода, в нажатом — цвета кнопки Save. И плашку моего сообщения подними до #1e1f24.'
             },
             {
               id: 'm2',
               role: 'assistant',
               model: '4 Argon',
-              timestamp: '08:02  •  25/11/26',
+              timestamp: '16:09  •  25/11/26',
               collapsed: false,
-              html: '<p>Оба блока перестроены без рамок и обводок на сплошном фоне <code>#000000</code>:</p><ul><li><strong>Thinking level:</strong> раскрытая группа получила затемнённую подложку <code>#15161a</code> с радиусом <code>10px</code>, а при сворачивании внешний контейнер схлопывается в <code>0fr</code> с нулевыми отступами и <code>visibility: hidden</code> — выбранный <code>None</code> больше не даёт светлую полосу над <code>Flex</code>.</li><li><strong>Нижняя панель над полем ввода:</strong> <code>Авто-STT</code> удалён; слева перенесён <code>0.000$</code> с открытием детализации вверх, по центру — <code>Voice: Voice 1, Puck</code>, справа — <code>Auto TTS</code>. Все три кнопки приведены к единому <code>Google Sans 12.5px</code> в приглушённом <code>#9a9fa8</code>.</li></ul>',
-              plainText: 'Оба блока перестроены: раскрытая группа Thinking level затемнена до #15161a и полностью скрывается при сворачивании даже при выбранном None; баланс перенесён в нижний ряд влево, по центру Voice: Voice 1, Puck, справа Auto TTS.'
+              html: '<p>Все три правки применены строго по спецификации без лишних обводок и рамок:</p><ul><li><strong>Меню моделей и Thinking:</strong> ограничение высоты <code>.gemini-model-menu</code> привязано к <code>calc(100dvh - env(safe-area-inset-top) - 96px)</code>, а заголовок <code>Thinking level</code> и его опции объединены в единую тёмную капсулу <code>#15161a</code> — строка <code>Flex : On / Off</code> остаётся полностью видимой под ним при раскрытом списке.</li><li><strong>Кнопки Tier-2 и Save:</strong> отжатые пиллы используют <code>#2e3038</code> (в тон полю ввода), а нажатые — ровно цвета кнопки <code>Save</code> (<code>#cfd2da</code> / <code>#121316</code>).</li><li><strong>Карточка пользователя:</strong> фон <code>.msg-user-card</code> переведён на <code>#1e1f24</code> с плавным градиентом сворачивания в тот же оттенок.</li></ul>',
+              plainText: 'Меню моделей расширено до calc(100dvh - env(safe-area-inset-top) - 96px), Thinking level и уровни объединены в единый блок #15161a с видимым Flex снизу; отжатые кнопки Tier-2 используют #2e3038, нажатые — цвета Save (#cfd2da / #121316); карточка пользователя переведена на #1e1f24.'
             },
             {
               id: 'm3',
               role: 'user',
-              timestamp: '08:03  •  25/11/26',
+              timestamp: '16:10  •  25/11/26',
               collapsed: false,
-              text: 'Как отрабатывает блокировка UI в момент записи с микрофона и во время расшифровки?'
+              text: 'Проверь сворачивание длинных сообщений, кнопку «•••» справа внизу для метаданных и блокировку всего интерфейса при записи с микрофона.'
             },
             {
               id: 'm4',
               role: 'assistant',
               model: '4 Hydrogen',
-              timestamp: '08:04  •  25/11/26',
+              timestamp: '16:11  •  25/11/26',
               collapsed: false,
-              html: '<p>При нажатии на кнопку микрофона закрываются любые открытые меню, шторки и поповеры, а на <code>body</code> вешается класс <code>mic-recording</code>. Все остальные кнопки, поля, шапка и элементы ленты получают <code>disabled</code>, <code>pointer-events: none</code> и приглушённую прозрачность — активной остаётся только красная пульсирующая кнопка остановки записи.</p><p>После повторного нажатия для завершения записи включается фаза <code>mic-transcribing</code> (~1.6 сек): внутри кнопки микрофона крутится спиннер, и <strong>вся</strong> панель, включая сам микрофон, полностью некликабельна до завершения распознавания.</p><p>Как только мок-расшифровка завершается, готовый русский текст подставляется в поле ввода, капсула при необходимости автоматически расширяется вверх с появлением крестика <code>×</code> в правом нижнем углу, а все элементы управления мгновенно разблокируются.</p>',
-              plainText: 'При записи активна только кнопка микрофона, все остальные элементы приложения полностью заблокированы. После остановки записи запускается фаза транскрибации (~1.6 сек), во время которой заблокированы все кнопки включая микрофон. По окончании текст вставляется в поле ввода и интерфейс разблокируется.'
+              html: '<p>Нажмите стрелку справа под любым сообщением для сворачивания до 3 строк или <code>•••</code>, чтобы увидеть время и модель генерации без загромождения ленты. При прокрутке вверх по центру над доком появляется кнопка быстрого возврата вниз.</p><p>Тап по <code>#btn-mic</code> закрывает открытые панели, блокирует весь интерфейс кроме кнопки остановки, а после остановки включает фазу <code>mic-transcribing</code> на 1.6 сек со спиннером до вставки текста.</p>',
+              plainText: 'Сворачивание до 3 строк и поповер ••• работают под каждым сообщением; кнопка возврата вниз появляется при скролле вверх; микрофон полностью блокирует интерфейс на время записи и транскрибации.'
             }
           ]
         },
@@ -2938,7 +3133,7 @@
         },
         {
           id: 'chat-10',
-          title: 'Защита бейсболки от солевых пятен',
+          title: 'Морфинг голоса LPC для STT',
           date: '17/11/26 · 10:50',
           pinned: false,
           order: 9,
@@ -2948,7 +3143,7 @@
               role: 'user',
               timestamp: '10:49  •  17/11/26',
               collapsed: false,
-              text: 'Что лучше держится под лентой кепки в жару — Tegaderm или вкладыши?'
+              text: 'Какой коэффициент МакАдамса не просаживает точность Whisper?'
             },
             {
               id: 'c10-m2',
@@ -2956,8 +3151,8 @@
               model: '3.8 Flash',
               timestamp: '10:50  •  17/11/26',
               collapsed: false,
-              html: '<p>Тонкая полиуретановая плёнка вроде <code>Tegaderm</code> под штатной лентой полностью блокирует выход соли на внешнюю ткань и не добавляет объёма.</p>',
-              plainText: 'Тонкая полиуретановая плёнка под лентой полностью блокирует выход соли на внешнюю ткань.'
+              html: '<p>Рабочий коридор — <code>0.82–0.88</code> или <code>1.12–1.16</code> с рандомизацией на каждую запись: форманты разъезжаются нелинейно, а разборчивость речи сохраняется.</p>',
+              plainText: 'Рабочий коридор — 0.82–0.88 или 1.12–1.16 с рандомизацией на каждую запись.'
             }
           ]
         },
@@ -3006,7 +3201,7 @@
               model: '4 Argon',
               timestamp: '09:42  •  15/11/26',
               collapsed: false,
-              html: '<p>Три стора: <code>chats</code> (мета + updatedAt), <code>messages</code> (индекс по <code>chatId</code>) и <code>settings</code> (ключи, пресеты голоса, дневные траты).</p>',
+              html: '<p>Три стора: <code>chats</code> (мета + updatedAt), <code>messages</code> (индекс по <code>chatId</code>) и <code>settings</code> (ключи, пресеты голоса, персоны, дневные траты).</p>',
               plainText: 'Три стора: chats, messages с индексом по chatId и settings.'
             }
           ]
@@ -3081,22 +3276,34 @@
         flexEnabled: true,
 
         thinking: 'high',
-        modelThinkingExpanded: false, // Always resets to collapsed on model dropdown open
+        modelThinkingExpanded: false, // Always resets collapsed when model dropdown opens
 
         ttsId: 'google/gemini-3.8-flash-lite-tts',
         sttId: 'openai/whisper-large-v3',
+        morphId: 'off',
 
         autoTts: false,
-        voicePanelOpen: false,
+        activeBottomPanel: null, // null | 'stats' | 'audio' | 'persona'
 
-        activePreset: 'Voice 1',
-        presets: {
+        // Audio Voice Presets
+        activeVoicePreset: 'Voice 1',
+        voicePresets: {
           'Voice 1': { voice: 'Puck', speed: 1.15, pitch: 1.00 },
           'Voice 2': { voice: 'Zephyr', speed: 1.25, pitch: 0.96 },
           'Voice 3': { voice: 'Charon', speed: 1.00, pitch: 0.92 },
           'Voice 4': { voice: 'Fenrir', speed: 1.10, pitch: 0.88 }
         },
         voiceDraft: { voice: 'Puck', speed: 1.15, pitch: 1.00 },
+
+        // AI Persona Presets (4 slots)
+        activePersonaIndex: 0,
+        personas: [
+          { name: '', instructions: '' },
+          { name: '', instructions: '' },
+          { name: '', instructions: '' },
+          { name: '', instructions: '' }
+        ],
+        personaDraft: { name: '', instructions: '' },
 
         openPopover: null,
         openInfoMsgId: null,
@@ -3127,6 +3334,7 @@
         moreDots: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"></circle></svg>',
         chevron: '<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>',
         chevronRight: '<svg viewBox="0 0 24 24"><polyline points="9 6 15 12 9 18"></polyline></svg>',
+        flexBolt: '<svg viewBox="0 0 24 24"><polygon points="13 2 4 14 12 14 11 22 20 10 12 10 13 2"></polygon></svg>',
         mddCheck: '<svg class="mdd-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>',
         editPencil: '<svg viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path></svg>',
         pushpin: '<svg viewBox="0 0 24 24"><path d="M12 17v5"></path><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"></path></svg>',
@@ -3140,13 +3348,17 @@
          ===================================================================== */
       const appShell = document.getElementById('appShell');
       const chatFeed = document.getElementById('chatFeed');
+      const dockScrim = document.getElementById('dockScrim');
       const bottomDock = document.getElementById('bottomDock');
+      const tier2Row = document.getElementById('tier2Row');
+      const floatingPanelsLayer = document.getElementById('floatingPanelsLayer');
       const scrollBottomBtn = document.getElementById('scrollBottomBtn');
+
       const composerCapsule = document.getElementById('composerCapsule');
       const composerInputWrap = document.getElementById('composerInputWrap');
       const chatInput = document.getElementById('chatInput');
       const clearInputBtn = document.getElementById('btn-clear-input');
-      const sendBtn = document.getElementById('sendBtn');
+      const sendBtn = document.getElementById('btn-send');
       const sendIconSvg = document.getElementById('sendIconSvg');
       const micBtn = document.getElementById('btn-mic');
       const micIconSvg = document.getElementById('micIconSvg');
@@ -3157,8 +3369,32 @@
 
       const modelBtnLabel = document.getElementById('modelBtnLabel');
       const thinkingBtnLabel = document.getElementById('thinkingBtnLabel');
-      const ttsBtnLabel = document.getElementById('ttsBtnLabel');
-      const sttBtnLabel = document.getElementById('sttBtnLabel');
+
+      // Tier-2 buttons & decoupled overlay panels
+      const statsDropdownBtn = document.getElementById('statsDropdownBtn');
+      const personaDockBtn = document.getElementById('personaDockBtn');
+      const personaDockLabel = document.getElementById('personaDockLabel');
+      const audioDockBtn = document.getElementById('audioDockBtn');
+      const autoTtsBtn = document.getElementById('autoTtsBtn');
+
+      const statsPanel = document.getElementById('statsPanel');
+      const audioPanel = document.getElementById('audioPanel');
+      const saveVoicePresetBtn = document.getElementById('saveVoicePresetBtn');
+      const ttsSelectLabel = document.getElementById('ttsSelectLabel');
+      const voiceSelectLabel = document.getElementById('voiceSelectLabel');
+      const sttSelectLabel = document.getElementById('sttSelectLabel');
+      const morphSelectLabel = document.getElementById('morphSelectLabel');
+      const speedSlider = document.getElementById('speedSlider');
+      const pitchSlider = document.getElementById('pitchSlider');
+      const speedVal = document.getElementById('speedVal');
+      const pitchVal = document.getElementById('pitchVal');
+
+      const personaPanel = document.getElementById('personaPanel');
+      const savePersonaPresetBtn = document.getElementById('savePersonaPresetBtn');
+      const personaNameInput = document.getElementById('personaNameInput');
+      const personaTextareaWrap = document.getElementById('personaTextareaWrap');
+      const personaInstructionsInput = document.getElementById('personaInstructionsInput');
+      const clearPersonaBtn = document.getElementById('btn-clear-persona');
 
       const popoverBackdrop = document.getElementById('popoverBackdrop');
       const popoverMenu = document.getElementById('popoverMenu');
@@ -3172,32 +3408,20 @@
       const selCountBadge = document.getElementById('selCountBadge');
       const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
 
-      const voicePanel = document.getElementById('voicePanel');
-      const voiceDockBtn = document.getElementById('voiceDockBtn');
-      const voiceDockLabel = document.getElementById('voiceDockLabel');
-      const voiceSelectLabel = document.getElementById('voiceSelectLabel');
-      const savePresetBtn = document.getElementById('savePresetBtn');
-      const speedSlider = document.getElementById('speedSlider');
-      const pitchSlider = document.getElementById('pitchSlider');
-      const speedVal = document.getElementById('speedVal');
-      const pitchVal = document.getElementById('pitchVal');
-
       const toastEl = document.getElementById('toast');
       let toastTimer = null;
 
-      /* Offscreen canvas for exact single-line width measurement */
+      /* Offscreen canvas for single-line text width measurement */
       const measureCanvas = document.createElement('canvas');
       const measureCtx = measureCanvas.getContext('2d');
 
       /* =====================================================================
-         GLOBAL iOS LONG-PRESS SELECTION & CALLOUT LOCK
+         GLOBAL iOS SELECTION & CALLOUT LOCK
          ===================================================================== */
       function clearWindowSelection() {
         try {
           const sel = window.getSelection ? window.getSelection() : null;
-          if (sel && sel.rangeCount > 0) {
-            sel.removeAllRanges();
-          }
+          if (sel && sel.rangeCount > 0) sel.removeAllRanges();
         } catch (_) {}
       }
 
@@ -3223,7 +3447,7 @@
         if (
           document.body.classList.contains('drawer-open') ||
           !el ||
-          el.closest('.drawer, .drawer-backdrop, .chat-item, .top-header, .bottom-dock, .popover-menu, .popover-backdrop, .ctx-menu, .ctx-backdrop')
+          el.closest('.drawer, .drawer-backdrop, .chat-item, .top-header, .bottom-dock, .floating-panels-layer, .dock-scrim, .popover-menu, .popover-backdrop, .ctx-menu, .ctx-backdrop')
         ) {
           e.preventDefault();
         }
@@ -3237,9 +3461,7 @@
         }
       });
 
-      drawerBackdrop.addEventListener('touchstart', () => {
-        clearWindowSelection();
-      }, { passive: true });
+      drawerBackdrop.addEventListener('touchstart', clearWindowSelection, { passive: true });
 
       /* =====================================================================
          UTILITIES
@@ -3253,7 +3475,6 @@
         }, 2000);
       }
 
-      // Format: "HH:MM  •  дд/мм/гг" (24h)
       function formatCompactTimestamp(date) {
         const hh = String(date.getHours()).padStart(2, '0');
         const mm = String(date.getMinutes()).padStart(2, '0');
@@ -3273,7 +3494,6 @@
         return state.chats.find(c => c.id === state.activeChatId) || state.chats[0] || null;
       }
 
-      // Reliable iFrame & iOS Safari copy using document.execCommand('copy')
       function copyToClipboard(text) {
         try {
           const ta = document.createElement('textarea');
@@ -3287,11 +3507,7 @@
           ta.select();
           document.execCommand('copy');
           document.body.removeChild(ta);
-        } catch (_) {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).catch(() => {});
-          }
-        }
+        } catch (_) {}
       }
 
       function escapeHtml(str) {
@@ -3319,8 +3535,16 @@
         });
       }
 
+      /* Position decoupled overlay panels 10px above .tier2-row */
+      function syncFloatingPanelsPosition() {
+        const rect = tier2Row.getBoundingClientRect();
+        if (!rect.height) return;
+        const bottomOffset = Math.max(120, Math.round(window.innerHeight - rect.top + 10));
+        floatingPanelsLayer.style.setProperty('--panels-bottom', `${bottomOffset}px`);
+      }
+
       /* =====================================================================
-         COMPLETE APP UI LOCK MANAGER FOR MIC RECORDING & TRANSCRIPTION
+         FULL-APP UI LOCK DURING MIC RECORDING & TRANSCRIPTION
          ===================================================================== */
       function applyAppMicLock(mode) {
         state.micState = mode;
@@ -3331,24 +3555,16 @@
         document.body.classList.toggle('mic-recording', isRecording);
         document.body.classList.toggle('mic-transcribing', isTranscribing);
 
-        const allControls = appShell.querySelectorAll('button, input, textarea');
-        allControls.forEach(el => {
+        appShell.querySelectorAll('button, input, textarea').forEach(el => {
           if (el === micBtn) {
-            const disableMic = isTranscribing;
-            el.disabled = disableMic;
-            if (disableMic) {
-              el.setAttribute('aria-disabled', 'true');
-            } else {
-              el.removeAttribute('aria-disabled');
-            }
+            el.disabled = isTranscribing;
+            if (isTranscribing) el.setAttribute('aria-disabled', 'true');
+            else el.removeAttribute('aria-disabled');
             return;
           }
           el.disabled = isLocked;
-          if (isLocked) {
-            el.setAttribute('aria-disabled', 'true');
-          } else {
-            el.removeAttribute('aria-disabled');
-          }
+          if (isLocked) el.setAttribute('aria-disabled', 'true');
+          else el.removeAttribute('aria-disabled');
         });
 
         micBtn.classList.toggle('recording', isRecording);
@@ -3395,6 +3611,7 @@
           const kbOffset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
           bottomDock.style.bottom = `${kbOffset}px`;
           window.scrollTo(0, 0);
+          syncFloatingPanelsPosition();
           updateScrollBottomBtn();
         };
         window.visualViewport.addEventListener('resize', syncViewport);
@@ -3406,7 +3623,10 @@
          ===================================================================== */
       function updateScrollBottomBtn() {
         const distFromBottom = chatFeed.scrollHeight - chatFeed.scrollTop - chatFeed.clientHeight;
-        const shouldShow = distFromBottom > 70 && !state.voicePanelOpen && state.micState === 'idle';
+        const shouldShow =
+          distFromBottom > 70 &&
+          !state.activeBottomPanel &&
+          state.micState === 'idle';
         scrollBottomBtn.classList.toggle('visible', shouldShow);
       }
 
@@ -3422,7 +3642,6 @@
       function getAvailSingleWidth() {
         const capW = composerCapsule.clientWidth;
         if (!capW) return 112;
-        // capsule.clientWidth - padding (22) - 3x50 buttons (150) - 3x8 gaps (24) - clear × space (28)
         return Math.max(44, capW - 22 - 150 - 24 - 28);
       }
 
@@ -3445,6 +3664,7 @@
           composerCapsule.classList.remove('is-expanded');
           state.isExpanded = false;
           chatInput.style.height = '';
+          syncFloatingPanelsPosition();
           return;
         }
 
@@ -3452,14 +3672,13 @@
         const hasNewline = val.includes('\n');
         const availSingleWidth = getAvailSingleWidth();
         const measuredWidth = hasNewline ? Infinity : measureTextSingleLine(val);
-
-        // -18px collapse hysteresis prevents jitter when deleting near the width edge
         const threshold = state.isExpanded ? (availSingleWidth - 18) : (availSingleWidth - 4);
 
         if (!hasNewline && measuredWidth <= threshold) {
           composerCapsule.classList.remove('is-expanded');
           state.isExpanded = false;
           chatInput.style.height = '';
+          syncFloatingPanelsPosition();
           return;
         }
 
@@ -3468,9 +3687,9 @@
         chatInput.style.height = 'auto';
         const targetHeight = Math.min(chatInput.scrollHeight, 156);
         chatInput.style.height = `${Math.max(25, targetHeight)}px`;
+        syncFloatingPanelsPosition();
       }
 
-      // Preserve iOS keyboard focus when tapping Clear (×)
       clearInputBtn.addEventListener('pointerdown', (e) => {
         if (state.micState !== 'idle') return;
         e.preventDefault();
@@ -3486,38 +3705,144 @@
 
       window.addEventListener('resize', () => {
         updateComposerLayout();
+        syncFloatingPanelsPosition();
         updateScrollBottomBtn();
       });
       if (document.fonts && document.fonts.ready) {
-        document.fonts.ready.then(() => updateComposerLayout());
+        document.fonts.ready.then(() => {
+          updateComposerLayout();
+          syncFloatingPanelsPosition();
+        });
       }
 
       /* =====================================================================
-         TOP HEADER SYNC
+         1. HEADER SYNC (OMITS REASONING LEVEL WHEN "None")
          ===================================================================== */
       function syncHeaderUI() {
         modelBtnLabel.textContent = state.modelLabel;
-
-        const thinkObj = THINKING_LEVELS.find(t => t.id === state.thinking) || THINKING_LEVELS[0];
-        thinkingBtnLabel.textContent = thinkObj.label;
-
-        const ttsObj = TTS_MODELS.find(t => t.id === state.ttsId) || TTS_MODELS[0];
-        ttsBtnLabel.textContent = ttsObj.name;
-
-        const sttObj = STT_MODELS.find(s => s.id === state.sttId) || STT_MODELS[0];
-        sttBtnLabel.textContent = sttObj.name;
+        if (state.thinking === 'none') {
+          thinkingBtnLabel.textContent = '';
+          thinkingBtnLabel.classList.add('hidden');
+        } else {
+          const thinkObj = THINKING_LEVELS.find(t => t.id === state.thinking) || THINKING_LEVELS[4];
+          thinkingBtnLabel.textContent = thinkObj.label;
+          thinkingBtnLabel.classList.remove('hidden');
+        }
       }
 
       /* =====================================================================
-         POPOVERS — MODEL (WITH CLEAN COLLAPSED THINKING & FLAT FLEX), TTS, STT,
-         UPWARD BALANCE STATS, UPWARD VOICE SELECTOR, AND ••• MESSAGE INFO
+         4. DECOUPLED BOTTOM OVERLAY PANELS — SINGLE-PASS ZERO FLICKER
+         ===================================================================== */
+      function renderStatsPanelContent() {
+        const ttsName = (TTS_MODELS.find(t => t.id === state.ttsId) || TTS_MODELS[0]).name;
+        const sttName = (STT_MODELS.find(s => s.id === state.sttId) || STT_MODELS[0]).name;
+        statsPanel.innerHTML = `
+          <div class="stats-card">
+            <div class="stats-top-row">
+              <div>
+                <div class="stats-balance-lbl">Остаток OpenRouter</div>
+                <div class="stats-balance-val">$0.000</div>
+              </div>
+              <div style="text-align:right;">
+                <div class="stats-balance-lbl">За день</div>
+                <div style="font-size:15px;font-weight:500;color:var(--menu-active-text);">$0.000</div>
+              </div>
+            </div>
+
+            <div class="stats-limit-wrap">
+              <div class="stats-limit-head">
+                <span>Дневной софт-лимит</span>
+                <span>$0.000 / $1.000</span>
+              </div>
+              <div class="stats-progress-track">
+                <div class="stats-progress-fill" style="width:0%;"></div>
+              </div>
+            </div>
+
+            <div class="stats-quota-box">
+              <span style="color:var(--text-level);">Free квота (:free)</span>
+              <span style="color:var(--menu-active-text);font-weight:500;">0 / 50</span>
+            </div>
+
+            <div class="stats-table">
+              <div class="stats-row">
+                <div style="min-width:0;">
+                  <div class="stats-row-name">Chat · ${escapeHtml(state.modelLabel)}</div>
+                  <div class="stats-row-sub">0 tok</div>
+                </div>
+                <div class="stats-row-val">$0.000</div>
+              </div>
+              <div class="stats-row">
+                <div style="min-width:0;">
+                  <div class="stats-row-name">TTS · ${escapeHtml(ttsName)}</div>
+                  <div class="stats-row-sub">0 симв</div>
+                </div>
+                <div class="stats-row-val">$0.000</div>
+              </div>
+              <div class="stats-row">
+                <div style="min-width:0;">
+                  <div class="stats-row-name">STT · ${escapeHtml(sttName)}</div>
+                  <div class="stats-row-sub">0 сек</div>
+                </div>
+                <div class="stats-row-val">$0.000</div>
+              </div>
+            </div>
+          </div>`;
+      }
+
+      function setBottomPanel(nextPanel) {
+        if (state.micState !== 'idle' && nextPanel !== null) return;
+
+        if (state.openPopover) {
+          closePopover();
+        }
+
+        if (nextPanel === 'stats') {
+          renderStatsPanelContent();
+        }
+
+        state.activeBottomPanel = nextPanel;
+
+        if (nextPanel !== null) {
+          syncFloatingPanelsPosition();
+        }
+
+        const isStats = nextPanel === 'stats';
+        const isAudio = nextPanel === 'audio';
+        const isPersona = nextPanel === 'persona';
+
+        statsPanel.classList.toggle('open', isStats);
+        audioPanel.classList.toggle('open', isAudio);
+        personaPanel.classList.toggle('open', isPersona);
+        dockScrim.classList.toggle('visible', nextPanel !== null);
+
+        statsDropdownBtn.classList.toggle('is-active', isStats);
+        audioDockBtn.classList.toggle('is-active', isAudio);
+        personaDockBtn.classList.toggle('is-active', isPersona);
+
+        updateScrollBottomBtn();
+      }
+
+      function toggleBottomPanel(panelName) {
+        if (state.micState !== 'idle') return;
+        const wasOpen = state.activeBottomPanel === panelName;
+        setBottomPanel(wasOpen ? null : panelName);
+      }
+
+      statsDropdownBtn.addEventListener('click', () => toggleBottomPanel('stats'));
+      audioDockBtn.addEventListener('click', () => toggleBottomPanel('audio'));
+      personaDockBtn.addEventListener('click', () => toggleBottomPanel('persona'));
+      dockScrim.addEventListener('click', () => setBottomPanel(null));
+
+      /* =====================================================================
+         2. POPOVERS: MODEL (WITH FIX #1a & #1b), TTS, VOICE, STT, MORPH, •••
          ===================================================================== */
       function closePopover() {
         state.openPopover = null;
         state.openInfoMsgId = null;
         popoverMenu.classList.remove('open', 'drop-up', 'gemini-model-menu', 'selector-menu', 'info-popover');
         popoverBackdrop.classList.remove('visible');
-        document.querySelectorAll('.gemini-model-trigger.open, .meta-trigger.open, .balance-pill.open, .vp-voice-select.open, .msg-icon-btn.info-open').forEach(el => {
+        document.querySelectorAll('.gemini-model-trigger.open, .panel-select-btn.open, .msg-icon-btn.info-open').forEach(el => {
           el.classList.remove('open', 'info-open');
         });
       }
@@ -3541,7 +3866,7 @@
         popoverMenu.style.width = fixedWidth ? `${fixedWidth}px` : (matchWidth ? `${Math.max(rect.width, 210)}px` : 'auto');
 
         const measuredH = popoverMenu.offsetHeight || 160;
-        const measuredW = fixedWidth || popoverMenu.offsetWidth || 244;
+        const measuredW = fixedWidth || popoverMenu.offsetWidth || 240;
 
         let shouldDropUp = dropUp;
         if (autoFlip) {
@@ -3575,9 +3900,9 @@
         }
       }
 
-      /* Center Model Dropdown (268px): 5 Models + Darker Collapsible Thinking + Flat Flex */
+      /* Center Model Dropdown (268px): 5 Models + Unified #15161a Thinking Container + Visible Flex */
       function renderModelDropdownContent() {
-        const thinkObj = THINKING_LEVELS.find(t => t.id === state.thinking) || THINKING_LEVELS[0];
+        const thinkObj = THINKING_LEVELS.find(t => t.id === state.thinking) || THINKING_LEVELS[4];
 
         const flexAvailable = state.modelSupportsFlex;
         const flexOn = flexAvailable && state.flexEnabled;
@@ -3589,43 +3914,46 @@
         CHAT_MODELS.forEach(m => {
           const sel = state.modelId === m.id ? 'selected' : '';
           html += `
-            <button class="mdd-item ${sel}" data-select-model="${escapeHtml(m.id)}">
+            <button class="model-opt ${sel}" data-select-model="${escapeHtml(m.id)}">
               <span>${escapeHtml(m.label)}</span>
               ${ICONS.mddCheck}
             </button>`;
         });
 
-        html += '<div class="mdd-gap"></div>';
-
-        // Collapsible "Thinking level" accordion (always resets collapsed on dropdown open)
+        /* Unified #15161a container for BOTH Thinking header AND options */
         html += `
-          <button class="mdd-thinking-btn ${state.modelThinkingExpanded ? 'expanded' : ''}" id="mddThinkingToggle" aria-expanded="${state.modelThinkingExpanded}">
-            <span class="mdd-thinking-chev">${ICONS.chevronRight}</span>
-            <span>Thinking level</span>
-            <span class="mdd-thinking-current">${escapeHtml(thinkObj.label)}</span>
-          </button>
-          <div class="mdd-thinking-panel ${state.modelThinkingExpanded ? 'expanded' : ''}" id="mddThinkingPanel">
-            <div class="mdd-thinking-inner">
-              <div class="mdd-thinking-list">`;
+          <div class="mdd-thinking-group">
+            <button class="mdd-thinking-btn ${state.modelThinkingExpanded ? 'expanded' : ''}" id="mddThinkingToggle" aria-expanded="${state.modelThinkingExpanded}">
+              <span class="mdd-thinking-chev">${ICONS.chevronRight}</span>
+              <span>Thinking level</span>
+              <span class="mdd-thinking-current">${escapeHtml(thinkObj.label)}</span>
+            </button>
+            <div class="mdd-thinking-panel ${state.modelThinkingExpanded ? 'expanded' : ''}" id="mddThinkingPanel">
+              <div class="mdd-thinking-inner">
+                <div class="mdd-thinking-list">`;
 
         THINKING_LEVELS.forEach(t => {
           const sel = state.thinking === t.id ? 'selected' : '';
           html += `
-                <button class="mdd-think-opt ${sel}" data-select-think="${t.id}">
-                  <span>${t.label}</span>
-                  ${ICONS.mddCheck}
-                </button>`;
+                  <button class="mdd-think-opt ${sel}" data-select-think="${t.id}">
+                    <span>${t.label}</span>
+                    ${ICONS.mddCheck}
+                  </button>`;
         });
 
         html += `
+                </div>
               </div>
             </div>
           </div>`;
 
-        // Flat Flex row directly on main #1e1f24 dropdown background
+        /* Flat Flex row directly on #1e1f24 below Thinking container */
         html += `
           <button class="mdd-flex-item ${flexClass}" id="mddFlexToggle" role="switch" aria-checked="${flexOn}" ${!flexAvailable ? 'aria-disabled="true"' : ''}>
-            <span>${flexText}</span>
+            <span class="mdd-flex-left">
+              <span class="mdd-flex-icon" aria-hidden="true">${ICONS.flexBolt}</span>
+              <span>${flexText}</span>
+            </span>
             ${flexOn ? ICONS.mddCheck : ''}
           </button>`;
 
@@ -3638,8 +3966,8 @@
             if (!found) return;
             state.modelId = found.id;
             state.modelLabel = found.label;
-            state.modelSupportsFlex = found.flexSupported;
-            if (!found.flexSupported) {
+            state.modelSupportsFlex = found.supportsFlex;
+            if (!found.supportsFlex) {
               state.flexEnabled = false;
             }
             syncHeaderUI();
@@ -3684,14 +4012,15 @@
           return;
         }
 
-        closePopover();
-        if (type === 'stats' && state.voicePanelOpen) {
-          toggleVoicePanel(false);
+        if (type === 'model' || type === 'info') {
+          setBottomPanel(null);
         }
+
+        closePopover();
         state.openPopover = type;
 
         if (type === 'model') {
-          state.modelThinkingExpanded = false; // Reset to collapsed on every open
+          state.modelThinkingExpanded = false; // Always resets collapsed on open
           anchorEl.classList.add('open');
           popoverMenu.classList.add('gemini-model-menu');
           renderModelDropdownContent();
@@ -3705,19 +4034,45 @@
           TTS_MODELS.forEach(t => {
             const sel = state.ttsId === t.id ? 'selected' : '';
             html += `
-              <button class="mdd-item ${sel}" data-select-tts="${escapeHtml(t.id)}">
+              <button class="model-opt ${sel}" data-select-tts="${escapeHtml(t.id)}">
                 <span>${escapeHtml(t.name)}</span>
                 ${ICONS.mddCheck}
               </button>`;
           });
           html += '</div>';
           popoverMenu.innerHTML = html;
-          positionPopover(anchorEl, { align: 'left', fixedWidth: 256 });
+          positionPopover(anchorEl, { align: 'left', dropUp: true, matchWidth: true });
 
           popoverMenu.querySelectorAll('[data-select-tts]').forEach(btn => {
             btn.addEventListener('click', () => {
               state.ttsId = btn.dataset.selectTts;
-              syncHeaderUI();
+              syncAudioPanelUI();
+              closePopover();
+            });
+          });
+        }
+
+        if (type === 'voice') {
+          anchorEl.classList.add('open');
+          popoverMenu.classList.add('selector-menu');
+          const currentVoice = state.voiceDraft.voice;
+          let html = '<div class="mdd-list">';
+          GEMINI_VOICES.forEach(v => {
+            const sel = currentVoice === v ? 'selected' : '';
+            html += `
+              <button class="model-opt ${sel}" data-select-voice="${v}">
+                <span>${v}</span>
+                ${ICONS.mddCheck}
+              </button>`;
+          });
+          html += '</div>';
+          popoverMenu.innerHTML = html;
+          positionPopover(anchorEl, { align: 'left', dropUp: true, matchWidth: true });
+
+          popoverMenu.querySelectorAll('[data-select-voice]').forEach(btn => {
+            btn.addEventListener('click', () => {
+              state.voiceDraft.voice = btn.dataset.selectVoice;
+              syncAudioPanelUI();
               closePopover();
             });
           });
@@ -3730,93 +4085,8 @@
           STT_MODELS.forEach(s => {
             const sel = state.sttId === s.id ? 'selected' : '';
             html += `
-              <button class="mdd-item ${sel}" data-select-stt="${escapeHtml(s.id)}">
+              <button class="model-opt ${sel}" data-select-stt="${escapeHtml(s.id)}">
                 <span>${escapeHtml(s.name)}</span>
-                ${ICONS.mddCheck}
-              </button>`;
-          });
-          html += '</div>';
-          popoverMenu.innerHTML = html;
-          positionPopover(anchorEl, { align: 'right', fixedWidth: 244 });
-
-          popoverMenu.querySelectorAll('[data-select-stt]').forEach(btn => {
-            btn.addEventListener('click', () => {
-              state.sttId = btn.dataset.selectStt;
-              syncHeaderUI();
-              closePopover();
-            });
-          });
-        }
-
-        /* Balance Breakdown Popover opening UPWARD above the Tier-2 bar */
-        if (type === 'stats') {
-          anchorEl.classList.add('open');
-          const ttsName = (TTS_MODELS.find(t => t.id === state.ttsId) || TTS_MODELS[0]).name;
-          const sttName = (STT_MODELS.find(s => s.id === state.sttId) || STT_MODELS[0]).name;
-          popoverMenu.innerHTML = `
-            <div class="stats-card">
-              <div class="stats-top-row">
-                <div>
-                  <div class="stats-balance-lbl">Остаток OpenRouter</div>
-                  <div class="stats-balance-val">$0.000</div>
-                </div>
-                <div style="text-align:right;">
-                  <div class="stats-balance-lbl">За день</div>
-                  <div style="font-size:15px;font-weight:500;color:var(--text-header);">$0.000</div>
-                </div>
-              </div>
-
-              <div class="stats-limit-wrap">
-                <div class="stats-limit-head">
-                  <span>Дневной софт-лимит</span>
-                  <span>$0.000 / $1.000</span>
-                </div>
-                <div class="stats-progress-track">
-                  <div class="stats-progress-fill" style="width:0%;"></div>
-                </div>
-              </div>
-
-              <div class="stats-quota-box">
-                <span style="color:var(--text-level);">Free квота (:free)</span>
-                <span style="color:var(--text-header);font-weight:500;">0 / 50</span>
-              </div>
-
-              <div class="stats-table">
-                <div class="stats-row">
-                  <div style="min-width:0;">
-                    <div class="stats-row-name">Chat · ${escapeHtml(state.modelLabel)}</div>
-                    <div class="stats-row-sub">0 tok</div>
-                  </div>
-                  <div class="stats-row-val">$0.000</div>
-                </div>
-                <div class="stats-row">
-                  <div style="min-width:0;">
-                    <div class="stats-row-name">TTS · ${escapeHtml(ttsName)}</div>
-                    <div class="stats-row-sub">0 симв</div>
-                  </div>
-                  <div class="stats-row-val">$0.000</div>
-                </div>
-                <div class="stats-row">
-                  <div style="min-width:0;">
-                    <div class="stats-row-name">STT · ${escapeHtml(sttName)}</div>
-                    <div class="stats-row-sub">0 сек</div>
-                  </div>
-                  <div class="stats-row-val">$0.000</div>
-                </div>
-              </div>
-            </div>`;
-          positionPopover(anchorEl, { align: 'left', dropUp: true });
-        }
-
-        if (type === 'voice') {
-          anchorEl.classList.add('open');
-          const currentVoice = state.voiceDraft.voice;
-          let html = '<div class="mdd-list">';
-          GEMINI_VOICES.forEach(v => {
-            const sel = currentVoice === v ? 'selected' : '';
-            html += `
-              <button class="mdd-item ${sel}" data-select-voice="${v}">
-                <span>${v}</span>
                 ${ICONS.mddCheck}
               </button>`;
           });
@@ -3824,10 +4094,35 @@
           popoverMenu.innerHTML = html;
           positionPopover(anchorEl, { align: 'left', dropUp: true, matchWidth: true });
 
-          popoverMenu.querySelectorAll('[data-select-voice]').forEach(btn => {
+          popoverMenu.querySelectorAll('[data-select-stt]').forEach(btn => {
             btn.addEventListener('click', () => {
-              state.voiceDraft.voice = btn.dataset.selectVoice;
-              syncVoicePanelUI();
+              state.sttId = btn.dataset.selectStt;
+              syncAudioPanelUI();
+              closePopover();
+            });
+          });
+        }
+
+        if (type === 'morph') {
+          anchorEl.classList.add('open');
+          popoverMenu.classList.add('selector-menu');
+          let html = '<div class="mdd-list">';
+          MORPH_MODES.forEach(m => {
+            const sel = state.morphId === m.id ? 'selected' : '';
+            html += `
+              <button class="model-opt ${sel}" data-select-morph="${m.id}">
+                <span>${m.name}</span>
+                ${ICONS.mddCheck}
+              </button>`;
+          });
+          html += '</div>';
+          popoverMenu.innerHTML = html;
+          positionPopover(anchorEl, { align: 'left', dropUp: true, matchWidth: true });
+
+          popoverMenu.querySelectorAll('[data-select-morph]').forEach(btn => {
+            btn.addEventListener('click', () => {
+              state.morphId = btn.dataset.selectMorph;
+              syncAudioPanelUI();
               closePopover();
             });
           });
@@ -3870,6 +4165,8 @@
             closeContextMenu();
           } else if (state.openPopover) {
             closePopover();
+          } else if (state.activeBottomPanel) {
+            setBottomPanel(null);
           } else if (!state.renamingChatId) {
             closeDrawer();
           }
@@ -3877,7 +4174,7 @@
       });
 
       /* =====================================================================
-         CHAT FEED, LIVE-ONLY THINKING & 5-ICON MESSAGE FOOTER
+         3. CHAT FEED, LIVE-ONLY THINKING & 5-ICON MESSAGE FOOTER
          ===================================================================== */
       function stopActivePlayback() {
         state.ttsPlayingMsgId = null;
@@ -3960,7 +4257,7 @@
 
           if (msg.role === 'user') {
             const card = document.createElement('div');
-            card.className = `user-card${msg.collapsed ? ' collapsed' : ''}`;
+            card.className = `msg-user-card${msg.collapsed ? ' collapsed' : ''}`;
 
             const textEl = document.createElement('div');
             textEl.className = `msg-body${msg.collapsed ? ' clamped' : ''}`;
@@ -4050,9 +4347,7 @@
             }
             chat.messages = chat.messages.filter(m => m.id !== msg.id);
             renderFeed();
-            if (aborted) {
-              showToast('Процесс прерван · сообщение удалено');
-            }
+            if (aborted) showToast('Процесс прерван · сообщение удалено');
           });
 
           const ttsBtn = document.createElement('button');
@@ -4106,87 +4401,166 @@
       }
 
       /* =====================================================================
-         BOTTOM DOCK: VOICE SETTINGS, TIER-2 BAR, MIC LOCK & STREAMING
+         4B. AUDIO (VOICE & MIC) PANEL LOGIC
          ===================================================================== */
-      function syncVoicePanelUI() {
+      function syncAudioPanelUI() {
         const d = state.voiceDraft;
+        const ttsObj = TTS_MODELS.find(t => t.id === state.ttsId) || TTS_MODELS[0];
+        const sttObj = STT_MODELS.find(s => s.id === state.sttId) || STT_MODELS[0];
+        const morphObj = MORPH_MODES.find(m => m.id === state.morphId) || MORPH_MODES[0];
+
+        ttsSelectLabel.textContent = ttsObj.name;
+        voiceSelectLabel.textContent = d.voice;
+        sttSelectLabel.textContent = sttObj.name;
+        morphSelectLabel.textContent = morphObj.name;
+
         speedSlider.value = d.speed.toFixed(2);
         pitchSlider.value = d.pitch.toFixed(2);
         speedVal.textContent = `${d.speed.toFixed(2)}x`;
         pitchVal.textContent = `${d.pitch.toFixed(2)}x`;
-        voiceSelectLabel.textContent = d.voice;
-        // English Tier-2 label strictly without speed: "Voice: Voice 1, Puck"
-        voiceDockLabel.textContent = `Voice: ${state.activePreset}, ${d.voice}`;
 
-        document.querySelectorAll('#presetGroup .vp-preset-btn').forEach(b => {
-          b.classList.toggle('active', b.dataset.preset === state.activePreset);
+        document.querySelectorAll('#voicePresetGroup .panel-preset-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.voicePreset === state.activeVoicePreset);
         });
       }
 
-      function toggleVoicePanel(forceState) {
-        if (state.micState !== 'idle' && forceState !== false) return;
-        const nextOpen = typeof forceState === 'boolean' ? forceState : !state.voicePanelOpen;
-        if (nextOpen && state.openPopover) {
-          closePopover();
-        }
-        state.voicePanelOpen = nextOpen;
-        voicePanel.classList.toggle('open', state.voicePanelOpen);
-        voiceDockBtn.classList.toggle('open', state.voicePanelOpen);
-        voiceDockBtn.classList.toggle('active', state.voicePanelOpen);
-        if (!state.voicePanelOpen && state.openPopover === 'voice') {
-          closePopover();
-        }
-        updateScrollBottomBtn();
-      }
-
-      voiceDockBtn.addEventListener('click', () => {
-        if (state.micState !== 'idle') return;
-        toggleVoicePanel();
-      });
-
-      document.querySelectorAll('#presetGroup .vp-preset-btn').forEach(btn => {
+      document.querySelectorAll('#voicePresetGroup .panel-preset-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           if (state.micState !== 'idle') return;
-          state.activePreset = btn.dataset.preset;
-          const saved = state.presets[state.activePreset];
+          state.activeVoicePreset = btn.dataset.voicePreset;
+          const saved = state.voicePresets[state.activeVoicePreset];
           state.voiceDraft = { voice: saved.voice, speed: saved.speed, pitch: saved.pitch };
-          syncVoicePanelUI();
+          syncAudioPanelUI();
         });
       });
 
       speedSlider.addEventListener('input', () => {
         state.voiceDraft.speed = parseFloat(speedSlider.value);
-        syncVoicePanelUI();
+        syncAudioPanelUI();
       });
 
       pitchSlider.addEventListener('input', () => {
         state.voiceDraft.pitch = parseFloat(pitchSlider.value);
-        syncVoicePanelUI();
+        syncAudioPanelUI();
       });
 
-      let saveFlashTimer = null;
-      savePresetBtn.addEventListener('click', () => {
+      let voiceSaveFlashTimer = null;
+      saveVoicePresetBtn.addEventListener('click', () => {
         if (state.micState !== 'idle') return;
-        state.presets[state.activePreset] = {
+        state.voicePresets[state.activeVoicePreset] = {
           voice: state.voiceDraft.voice,
           speed: state.voiceDraft.speed,
           pitch: state.voiceDraft.pitch
         };
-        savePresetBtn.textContent = 'Saved';
-        savePresetBtn.classList.add('saved');
-        clearTimeout(saveFlashTimer);
-        saveFlashTimer = setTimeout(() => {
-          savePresetBtn.textContent = 'Save';
-          savePresetBtn.classList.remove('saved');
+        saveVoicePresetBtn.textContent = 'Saved';
+        saveVoicePresetBtn.classList.add('saved');
+        clearTimeout(voiceSaveFlashTimer);
+        voiceSaveFlashTimer = setTimeout(() => {
+          saveVoicePresetBtn.textContent = 'Save';
+          saveVoicePresetBtn.classList.remove('saved');
         }, 1200);
-        showToast(`${state.activePreset}: ${state.voiceDraft.voice} · ${state.voiceDraft.speed.toFixed(2)}x`);
+        showToast(`${state.activeVoicePreset}: ${state.voiceDraft.voice} · ${state.voiceDraft.speed.toFixed(2)}x`);
       });
 
-      const autoTtsBtn = document.getElementById('autoTtsBtn');
+      /* =====================================================================
+         4C. AI PERSONA PANEL LOGIC
+         ===================================================================== */
+      function syncPersonaClearBtn() {
+        personaTextareaWrap.classList.toggle('has-text', personaInstructionsInput.value.length > 0);
+      }
+
+      function syncPersonaUI() {
+        const idx = state.activePersonaIndex;
+        const activeSaved = state.personas[idx];
+
+        document.querySelectorAll('#personaPresetGroup .panel-preset-btn').forEach(btn => {
+          const i = Number(btn.dataset.personaPreset);
+          const p = state.personas[i];
+          btn.textContent = p.name.trim() ? p.name.trim() : `Persona ${i + 1}`;
+          btn.classList.toggle('active', i === idx);
+        });
+
+        const dockLabel = activeSaved.name.trim() ? activeSaved.name.trim() : 'AI Persona';
+        personaDockLabel.textContent = dockLabel;
+        personaDockLabel.dataset.label = dockLabel;
+
+        personaNameInput.value = state.personaDraft.name;
+        personaInstructionsInput.value = state.personaDraft.instructions;
+        syncPersonaClearBtn();
+      }
+
+      document.querySelectorAll('#personaPresetGroup .panel-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (state.micState !== 'idle') return;
+          const idx = Number(btn.dataset.personaPreset);
+          state.activePersonaIndex = idx;
+          const p = state.personas[idx];
+          state.personaDraft = { name: p.name, instructions: p.instructions };
+          syncPersonaUI();
+        });
+      });
+
+      personaNameInput.addEventListener('input', () => {
+        state.personaDraft.name = personaNameInput.value;
+      });
+
+      personaNameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const trimmed = personaNameInput.value.trim();
+          state.personaDraft.name = trimmed;
+          state.personas[state.activePersonaIndex].name = trimmed;
+          syncPersonaUI();
+          personaNameInput.blur();
+        }
+      });
+
+      personaInstructionsInput.addEventListener('input', () => {
+        state.personaDraft.instructions = personaInstructionsInput.value;
+        syncPersonaClearBtn();
+      });
+
+      clearPersonaBtn.addEventListener('pointerdown', (e) => {
+        if (state.micState !== 'idle') return;
+        e.preventDefault();
+      });
+
+      clearPersonaBtn.addEventListener('click', () => {
+        if (state.micState !== 'idle') return;
+        personaInstructionsInput.value = '';
+        state.personaDraft.instructions = '';
+        syncPersonaClearBtn();
+        personaInstructionsInput.focus();
+      });
+
+      let personaSaveFlashTimer = null;
+      savePersonaPresetBtn.addEventListener('click', () => {
+        if (state.micState !== 'idle') return;
+        const idx = state.activePersonaIndex;
+        const trimmedName = personaNameInput.value.trim();
+        state.personaDraft.name = trimmedName;
+        state.personaDraft.instructions = personaInstructionsInput.value;
+        state.personas[idx] = {
+          name: trimmedName,
+          instructions: state.personaDraft.instructions
+        };
+        syncPersonaUI();
+
+        savePersonaPresetBtn.textContent = 'Saved';
+        savePersonaPresetBtn.classList.add('saved');
+        clearTimeout(personaSaveFlashTimer);
+        personaSaveFlashTimer = setTimeout(() => {
+          savePersonaPresetBtn.textContent = 'Save';
+          savePersonaPresetBtn.classList.remove('saved');
+        }, 1200);
+        showToast(`Сохранено: ${trimmedName || `Persona ${idx + 1}`}`);
+      });
+
+      /* Auto TTS Boolean Toggle */
       autoTtsBtn.addEventListener('click', () => {
         if (state.micState !== 'idle') return;
         state.autoTts = !state.autoTts;
-        autoTtsBtn.classList.toggle('active', state.autoTts);
+        autoTtsBtn.classList.toggle('is-active', state.autoTts);
         autoTtsBtn.setAttribute('aria-pressed', String(state.autoTts));
       });
 
@@ -4195,6 +4569,9 @@
         showToast('Вложения: фото / файл (мок)');
       });
 
+      /* =====================================================================
+         4D. COMPOSER SEND / STOP & MIC RECORDING LOCK FLOW
+         ===================================================================== */
       function syncSendButton() {
         if (state.generatingMsgId) {
           sendBtn.classList.remove('ready');
@@ -4237,14 +4614,10 @@
         }
       });
 
-      /* ---------------------------------------------------------------------
-         MIC RECORDING -> TRANSCRIPTION FULL-APP LOCK FLOW
-         --------------------------------------------------------------------- */
       function startMicRecording() {
-        // Close every open overlay/drawer/voice panel & blur keyboard before locking
         closePopover();
         closeContextMenu();
-        toggleVoicePanel(false);
+        setBottomPanel(null);
         closeDrawer();
         stopActivePlayback();
         if (document.activeElement && document.activeElement.blur) {
@@ -4266,14 +4639,14 @@
         clearInterval(state.recInterval);
         state.recInterval = null;
 
-        // Enter ~1.6s transcribing phase where ALL buttons INCLUDING #btn-mic are locked
         applyAppMicLock('transcribing');
 
         clearTimeout(state.transcribeTimer);
         state.transcribeTimer = setTimeout(() => {
           state.transcribeTimer = null;
 
-          const sampleDictation = 'Проверь, как держится аудиосессия после остановки записи и оставь пресет Voice 1 с голосом Puck.';
+          const morphName = (MORPH_MODES.find(m => m.id === state.morphId) || MORPH_MODES[0]).name;
+          const sampleDictation = `Проверка STT (Morph: ${morphName}) — интерфейс разблокирован, можно править текст или отправлять в OpenRouter.`;
           const existing = chatInput.value.trim();
           chatInput.value = existing ? `${existing} ${sampleDictation}` : sampleDictation;
 
@@ -4302,6 +4675,9 @@
         const text = chatInput.value.trim();
         if (!text) return;
 
+        setBottomPanel(null);
+        closePopover();
+
         let chat = getActiveChat();
         if (!chat) {
           chat = createNewChatObject();
@@ -4329,8 +4705,9 @@
 
         const capturedModel = state.modelLabel;
         const flexStateText = state.modelSupportsFlex && state.flexEnabled ? 'Flex : On' : 'Flex : Off';
-        const thinkLabel = (THINKING_LEVELS.find(t => t.id === state.thinking) || THINKING_LEVELS[0]).label;
-        const replyText = `Ответ сгенерирован моделью ${capturedModel} (${flexStateText}, Thinking: ${thinkLabel}). Нажмите «•••» справа под сообщением, чтобы увидеть время и модель генерации.`;
+        const thinkLabel = (THINKING_LEVELS.find(t => t.id === state.thinking) || THINKING_LEVELS[4]).label;
+        const activePersonaName = state.personas[state.activePersonaIndex].name.trim() || 'AI Persona';
+        const replyText = `Ответ сгенерирован моделью ${capturedModel} (${flexStateText}, Thinking: ${thinkLabel}, Persona: ${activePersonaName}). Нажмите «•••» справа под сообщением, чтобы увидеть время и модель генерации.`;
         const words = replyText.split(' ');
         let wordIdx = 0;
 
@@ -4357,7 +4734,7 @@
           aiMsg.streaming = true;
           renderFeed(true);
 
-          const stepMs = Math.max(55, Math.floor(1650 / Math.ceil(words.length / 2)));
+          const stepMs = Math.max(55, Math.floor(2000 / Math.ceil(words.length / 2)));
           state.streamTimer = setInterval(() => {
             if (state.generatingMsgId !== aiId) {
               clearGenerationTimers();
@@ -4392,17 +4769,14 @@
           renderFeed(true);
         }, 1000);
 
-        const t3 = setTimeout(() => {
-          beginStreaming();
-        }, 1500);
-
+        const t3 = setTimeout(beginStreaming, 1500);
         state.thinkingTimers.push(t1, t2, t3);
       }
 
       sendBtn.addEventListener('click', handleSendOrStop);
 
       /* =====================================================================
-         LEFT SIDE DRAWER: SWIPE-SELECT + LONG-PRESS RENAME & PIN
+         5. LEFT DRAWER: SILENT SWITCH, SWIPE-SELECT, RENAME & PIN
          ===================================================================== */
       function createNewChatObject() {
         return {
@@ -4419,6 +4793,7 @@
         if (state.micState !== 'idle') return;
         closePopover();
         closeContextMenu();
+        setBottomPanel(null);
         stopActivePlayback();
         abortGeneration(false, true);
         const existingEmpty = state.chats.find(c => c.messages.length === 0);
@@ -4438,6 +4813,7 @@
         if (state.micState !== 'idle') return;
         closePopover();
         closeContextMenu();
+        setBottomPanel(null);
         if (document.activeElement && document.activeElement.blur) {
           document.activeElement.blur();
         }
@@ -4463,13 +4839,13 @@
       document.getElementById('closeDrawerBtn').addEventListener('click', closeDrawer);
       drawerBackdrop.addEventListener('click', closeDrawer);
 
+      /* Silent provider switch (zero toast/notification) */
       document.querySelectorAll('#providerSwitch .seg-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           if (state.micState !== 'idle') return;
           document.querySelectorAll('#providerSwitch .seg-btn').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
           state.provider = btn.dataset.provider;
-          showToast(state.provider === 'openrouter' ? 'Провайдер: OpenRouter' : 'Провайдер: Direct / Custom');
         });
       });
 
@@ -4502,11 +4878,8 @@
         const already = state.selectedChatIds.has(chatId);
         if (already === shouldSelect) return;
 
-        if (shouldSelect) {
-          state.selectedChatIds.add(chatId);
-        } else {
-          state.selectedChatIds.delete(chatId);
-        }
+        if (shouldSelect) state.selectedChatIds.add(chatId);
+        else state.selectedChatIds.delete(chatId);
 
         const rowEl = chatListEl.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
         if (rowEl) {
@@ -4517,7 +4890,6 @@
         syncBulkToolbarUI();
       }
 
-      // Instant 1-tap bulk delete (zero confirmation dialog)
       bulkDeleteBtn.addEventListener('click', () => {
         if (state.micState !== 'idle' || state.selectedChatIds.size === 0) return;
 
@@ -4555,9 +4927,7 @@
         Array.from(state.selectedChatIds).forEach(id => applyChatSelection(id, false));
       });
 
-      /* ---------------------------------------------------------------------
-         LONG-PRESS CONTEXT MENU (ПЕРЕИМЕНОВАТЬ + PIN)
-         --------------------------------------------------------------------- */
+      /* Long-press Context Menu (Переименовать + Pin) */
       function closeContextMenu() {
         state.contextMenuChatId = null;
         ctxMenu.classList.remove('open', 'drop-up');
@@ -4656,9 +5026,7 @@
         });
       }
 
-      /* ---------------------------------------------------------------------
-         iOS SWIPE-SELECT ENGINE (36px .chat-check-col, elementFromPoint)
-         --------------------------------------------------------------------- */
+      /* iOS Swipe-Select Engine (.chat-check-col, elementFromPoint) */
       const dragSelect = {
         active: false,
         mode: true,
@@ -4726,7 +5094,6 @@
         }
       }, { passive: true });
 
-      // Swipe left on drawer to close
       let drawerSwipeStartX = 0;
       let drawerSwipeStartY = 0;
       let drawerSwipeBlocked = false;
@@ -4741,9 +5108,7 @@
         if (drawerSwipeBlocked || dragSelect.active) return;
         const dx = drawerSwipeStartX - e.changedTouches[0].clientX;
         const dy = Math.abs(drawerSwipeStartY - e.changedTouches[0].clientY);
-        if (dx > 64 && dx > dy * 1.5) {
-          closeDrawer();
-        }
+        if (dx > 64 && dx > dy * 1.5) closeDrawer();
       }, { passive: true });
 
       function renderChatList() {
@@ -4812,11 +5177,10 @@
             mainArea.appendChild(metaEl);
           } else {
             mainArea.innerHTML = `
-              <div class="chat-item-title">${escapeHtml(chat.title)}</div>
+              <div class="chat-title">${escapeHtml(chat.title)}</div>
               <div class="chat-item-meta">${escapeHtml(chat.date)} · ${chat.messages.length} сообщ.</div>
             `;
 
-            // 450ms long-press (cancelled on >10px movement) + iOS selection suppression
             let lpTimer = null;
             let lpStartX = 0;
             let lpStartY = 0;
@@ -4905,7 +5269,6 @@
 
           row.appendChild(mainArea);
 
-          // Tiny 11.5px pushpin SVG immediately to the left of select checkbox
           if (chat.pinned) {
             const pinEl = document.createElement('div');
             pinEl.className = 'chat-pin-indicator';
@@ -4951,9 +5314,11 @@
          INITIALIZATION
          ===================================================================== */
       syncHeaderUI();
-      syncVoicePanelUI();
+      syncAudioPanelUI();
+      syncPersonaUI();
       syncSendButton();
       updateComposerLayout();
+      syncFloatingPanelsPosition();
       renderFeed();
       renderChatList();
     })();
