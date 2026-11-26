@@ -2,7 +2,7 @@
   'use strict';
 
   /* =========================================================================
-     CONSTANTS & CATALOGS (STEP 4.4: TTS FORMAT AUTO-DETECT + STRICT ABORT + RETRY & EDIT)
+     CONSTANTS & CATALOGS (STEP 4.5: iOS MIC LEAK & AUDIO SESSION FIX)
      ========================================================================= */
   const DB_NAME = 'OpenRouterPWA_DB';
   const DB_VERSION = 2;
@@ -668,6 +668,9 @@
     isExpanded: false,
 
     micState: 'idle',
+    micStarting: false,
+    micCancelPending: false,
+    audioSessionRestoreTimer: null,
     recSeconds: 0,
     recStartedAt: 0,
     recInterval: null,
@@ -2656,13 +2659,26 @@
     return sharedDecodeAudioCtx;
   }
 
+  function closeDecodeAudioContext() {
+    if (!sharedDecodeAudioCtx) return;
+    const ctx = sharedDecodeAudioCtx;
+    sharedDecodeAudioCtx = null;
+    try {
+      if (ctx.state !== 'closed' && typeof ctx.close === 'function') {
+        ctx.close().catch(() => {});
+      }
+    } catch (_) {}
+  }
+
   // Must be called synchronously inside a user tap handler on iOS Safari
   function unlockAudioSyncInUserGesture(forceSilentPrime = false) {
+    if (state.micState === 'idle' && !state.micStarting && (activeMicStreams.size > 0 || state.mediaStream)) {
+      releaseMicStreamAndRestoreAudio(false);
+    }
     setAudioSessionType('playback');
     try {
-      const ctx = getDecodeAudioContext();
-      if (ctx && ctx.state === 'suspended') {
-        ctx.resume().catch(() => {});
+      if (sharedDecodeAudioCtx && sharedDecodeAudioCtx.state === 'suspended') {
+        sharedDecodeAudioCtx.resume().catch(() => {});
       }
     } catch (_) {}
 
@@ -4627,20 +4643,85 @@
 
   /* =========================================================================
      REAL STT ENGINE: MediaRecorder -> /api/v1/audio/transcriptions
-     + iOS HARD track.stop() & navigator.audioSession.type = 'playback' RESET
+     + LEAK-PROOF STREAM REGISTRY, RE-ENTRANCY LOCK & iOS AUDIO SESSION RESET
      ========================================================================= */
-  function releaseMicStreamAndRestoreAudio() {
-    if (state.mediaStream) {
+  const activeMicStreams = new Set();
+
+  function hardStopSingleStream(stream) {
+    if (!stream) return;
+    try {
+      const tracks = typeof stream.getTracks === 'function' ? stream.getTracks().slice() : [];
+      tracks.forEach((track) => {
+        try { track.onended = null; } catch (_) {}
+        try { track.enabled = false; } catch (_) {}
+        try { track.stop(); } catch (_) {}
+        try {
+          if (typeof stream.removeTrack === 'function') {
+            stream.removeTrack(track);
+          }
+        } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
+  function releaseMicStreamAndRestoreAudio(restorePlaybackSession = true) {
+    clearTimeout(state.audioSessionRestoreTimer);
+    state.audioSessionRestoreTimer = null;
+
+    if (state.mediaRecorder) {
+      const rec = state.mediaRecorder;
+      state.mediaRecorder = null;
+      try { rec.ondataavailable = null; } catch (_) {}
+      try { rec.onstop = null; } catch (_) {}
+      try { rec.onerror = null; } catch (_) {}
       try {
-        state.mediaStream.getTracks().forEach((track) => {
-          try { track.stop(); } catch (_) {}
-        });
+        if (rec.state && rec.state !== 'inactive') {
+          rec.stop();
+        }
       } catch (_) {}
+    }
+
+    if (state.mediaStream) {
+      activeMicStreams.add(state.mediaStream);
       state.mediaStream = null;
     }
-    state.mediaRecorder = null;
-    // Crucial on iOS Safari: return audio routing from earpiece to main loudspeaker
-    setAudioSessionType('playback');
+
+    activeMicStreams.forEach((s) => hardStopSingleStream(s));
+    activeMicStreams.clear();
+
+    // Close WebAudio decode context so CoreAudio never keeps VoiceProcessingIO / PlayAndRecord alive
+    closeDecodeAudioContext();
+
+    if (restorePlaybackSession) {
+      // Two-step iOS WebKit audioSession reset:
+      // 1) 'auto' immediately releases the hardware mic indicator (orange pill/dot)
+      // 2) delayed 'playback' re-routes output cleanly to the main bottom loudspeaker
+      setAudioSessionType('auto');
+      state.audioSessionRestoreTimer = setTimeout(() => {
+        state.audioSessionRestoreTimer = null;
+        if (state.micState === 'idle' && !state.micStarting && activeMicStreams.size === 0) {
+          setAudioSessionType('playback');
+        }
+      }, 220);
+    }
+  }
+
+  function abortMicOnBackground() {
+    if (state.micStarting) {
+      state.micCancelPending = true;
+    }
+    if (state.micState === 'recording') {
+      clearInterval(state.recInterval);
+      state.recInterval = null;
+      state.recordedChunks = [];
+      releaseMicStreamAndRestoreAudio(true);
+      applyAppMicLock('idle');
+      updateComposerLayout();
+      syncSendButton();
+      updateScrollBottomBtn();
+    } else if (activeMicStreams.size > 0 || state.mediaStream) {
+      releaseMicStreamAndRestoreAudio(true);
+    }
   }
 
   function pickSupportedRecorderMimeType() {
@@ -4693,6 +4774,9 @@
   }
 
   async function startMicRecording() {
+    // Re-entrancy guard: prevents double-tap from opening a second leaked getUserMedia stream
+    if (state.micStarting || state.micState !== 'idle') return;
+
     closePopover();
     closeContextMenu();
     setBottomPanel(null);
@@ -4717,7 +4801,14 @@
       return;
     }
 
-    setAudioSessionType('play-and-record');
+    state.micStarting = true;
+    state.micCancelPending = false;
+    micBtn.disabled = true;
+
+    // Clean any leftover stream & close WebAudio context before requesting hardware mic
+    releaseMicStreamAndRestoreAudio(false);
+    // Keep audioSession in 'auto' so iOS ties mic hardware lifetime strictly to MediaStreamTrack
+    setAudioSessionType('auto');
 
     let stream = null;
     try {
@@ -4733,13 +4824,26 @@
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       }
     } catch (err) {
-      releaseMicStreamAndRestoreAudio();
+      state.micStarting = false;
+      micBtn.disabled = false;
+      releaseMicStreamAndRestoreAudio(true);
       const name = err && err.name ? err.name : '';
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
         showToast('Нет доступа к микрофону в настройках Safari');
       } else {
         showToast('Не удалось включить микрофон');
       }
+      return;
+    }
+
+    // Immediately register every acquired MediaStream so it can never be orphaned
+    activeMicStreams.add(stream);
+
+    if (state.micCancelPending || document.visibilityState === 'hidden') {
+      state.micStarting = false;
+      state.micCancelPending = false;
+      micBtn.disabled = false;
+      releaseMicStreamAndRestoreAudio(true);
       return;
     }
 
@@ -4751,8 +4855,9 @@
       try {
         recorder = new MediaRecorder(stream);
       } catch (err2) {
-        try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
-        releaseMicStreamAndRestoreAudio();
+        state.micStarting = false;
+        micBtn.disabled = false;
+        releaseMicStreamAndRestoreAudio(true);
         showToast('Ошибка инициализации записи');
         return;
       }
@@ -4769,6 +4874,16 @@
       }
     };
 
+    // If iOS forcibly interrupts the mic (incoming call / Siri), clean up immediately
+    stream.getAudioTracks().forEach((track) => {
+      track.onended = () => {
+        if (state.micState === 'recording' && state.mediaStream === stream) {
+          stopMicAndTranscribe();
+        }
+      };
+    });
+
+    state.micStarting = false;
     state.recSeconds = 0;
     state.recStartedAt = Date.now();
     micStatusTimer.textContent = '0:00';
@@ -4785,13 +4900,15 @@
     } catch (_) {
       clearInterval(state.recInterval);
       state.recInterval = null;
-      releaseMicStreamAndRestoreAudio();
+      releaseMicStreamAndRestoreAudio(true);
       applyAppMicLock('idle');
       showToast('Не удалось начать запись');
     }
   }
 
   async function stopMicAndTranscribe() {
+    if (state.micState !== 'recording') return;
+
     clearInterval(state.recInterval);
     state.recInterval = null;
 
@@ -4804,9 +4921,11 @@
       if (recorder && recorder.state !== 'inactive') {
         await new Promise((resolve) => {
           let done = false;
+          let timerId = null;
           const finish = () => {
             if (done) return;
             done = true;
+            if (timerId) clearTimeout(timerId);
             resolve();
           };
           recorder.onstop = finish;
@@ -4816,12 +4935,12 @@
           } catch (_) {
             finish();
           }
-          setTimeout(finish, 1500);
+          timerId = setTimeout(finish, 1200);
         });
       }
 
-      // Immediately stop hardware mic tracks & restore loudspeaker session
-      releaseMicStreamAndRestoreAudio();
+      // Immediately release all hardware mic tracks, clear registry & reset iOS audioSession
+      releaseMicStreamAndRestoreAudio(true);
 
       const mimeType = state.recordedMimeType || (state.recordedChunks[0] && state.recordedChunks[0].type) || 'audio/mp4';
       const audioBlob = new Blob(state.recordedChunks, { type: mimeType });
@@ -4896,10 +5015,10 @@
       const existing = chatInput.value.trim();
       chatInput.value = existing ? `${existing} ${transcript}` : transcript;
     } catch (err) {
-      releaseMicStreamAndRestoreAudio();
+      releaseMicStreamAndRestoreAudio(true);
       showToast(err && err.message ? err.message : 'Ошибка транскрибации');
     } finally {
-      releaseMicStreamAndRestoreAudio();
+      releaseMicStreamAndRestoreAudio(true);
       applyAppMicLock('idle');
       updateComposerLayout();
       syncSendButton();
@@ -4908,7 +5027,7 @@
   }
 
   micBtn.addEventListener('click', () => {
-    if (state.micState === 'transcribing') return;
+    if (state.micStarting || state.micState === 'transcribing') return;
     if (state.micState === 'recording') {
       stopMicAndTranscribe();
     } else {
@@ -6375,12 +6494,21 @@
     }
 
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'hidden') {
+        abortMicOnBackground();
+      } else if (document.visibilityState === 'visible') {
+        if (state.micState === 'idle' && !state.micStarting && (activeMicStreams.size > 0 || state.mediaStream)) {
+          releaseMicStreamAndRestoreAudio(true);
+        }
         const age = Date.now() - (state.creditsInfo.updatedAt || 0);
         if (age > 15000 && (state.apiKeys.openrouter || '').trim()) {
           fetchOpenRouterBalance(false);
         }
       }
+    });
+
+    window.addEventListener('pagehide', () => {
+      abortMicOnBackground();
     });
   }
 
