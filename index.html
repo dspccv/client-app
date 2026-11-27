@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="OpenRouter">
   <meta name="theme-color" content="#000000">
   <meta name="format-detection" content="telephone=no">
@@ -392,7 +392,7 @@
        2. BORDERLESS POPOVERS & CENTER MODEL DROPDOWN (FIX #1a & #1b)
        ========================================================================== */
     .popover-backdrop {
-      position: fixed;
+      position: absolute;
       inset: 0;
       z-index: 58;
       background: rgba(0, 0, 0, 0.42);
@@ -766,10 +766,13 @@
        ========================================================================== */
     .chat-feed {
       flex: 1;
+      min-height: 0;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+      touch-action: pan-y;
       background-color: var(--bg);
-      padding: 8px 16px 215px;
+      padding: 8px 16px 196px;
       display: flex;
       flex-direction: column;
       gap: 20px;
@@ -1027,7 +1030,7 @@
        4. TRANSPARENT FLOATING BOTTOM DOCK & DECOUPLED PANEL LAYERS
        ========================================================================== */
     .dock-scrim {
-      position: fixed;
+      position: absolute;
       inset: 0;
       z-index: 40;
       background: rgba(0, 0, 0, 0.38);
@@ -1050,7 +1053,7 @@
       background: transparent;
       pointer-events: none;
       padding-top: 4px;
-      padding-bottom: calc(max(24px, env(safe-area-inset-bottom)) + 12px);
+      padding-bottom: max(20px, calc(env(safe-area-inset-bottom, 0px) - 6px));
       display: flex;
       flex-direction: column;
     }
@@ -2071,7 +2074,7 @@
        5. LEFT DRAWER (#111113, ZERO BORDERS, NO BOTTOM FOOTER)
        ========================================================================== */
     .drawer-backdrop {
-      position: fixed;
+      position: absolute;
       inset: 0;
       z-index: 70;
       background: rgba(0, 0, 0, 0.64);
@@ -2539,7 +2542,7 @@
        BORDERLESS LONG-PRESS CONTEXT MENU (ПЕРЕИМЕНОВАТЬ + PIN)
        ========================================================================== */
     .ctx-backdrop {
-      position: fixed;
+      position: absolute;
       inset: 0;
       z-index: 85;
       background: rgba(0, 0, 0, 0.34);
@@ -2645,9 +2648,9 @@
        BORDERLESS TOAST (NO alert() / confirm())
        ========================================================================== */
     .toast {
-      position: fixed;
+      position: absolute;
       left: 50%;
-      bottom: calc(max(24px, env(safe-area-inset-bottom)) + 160px);
+      bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 146px);
       transform: translateX(-50%) translateY(10px);
       z-index: 95;
       background-color: #282b33;
