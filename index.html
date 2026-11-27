@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="OpenRouter">
   <meta name="theme-color" content="#000000">
   <meta name="format-detection" content="telephone=no">
@@ -196,6 +196,7 @@
        BASE & iOS PWA GEOMETRY
        ========================================================================== */
     html, body {
+      position: relative;
       width: 100%;
       height: 100%;
       -webkit-text-size-adjust: 100%;
@@ -392,7 +393,7 @@
        2. BORDERLESS POPOVERS & CENTER MODEL DROPDOWN (FIX #1a & #1b)
        ========================================================================== */
     .popover-backdrop {
-      position: fixed;
+      position: absolute;
       inset: 0;
       z-index: 58;
       background: rgba(0, 0, 0, 0.42);
@@ -1027,7 +1028,7 @@
        4. TRANSPARENT FLOATING BOTTOM DOCK & DECOUPLED PANEL LAYERS
        ========================================================================== */
     .dock-scrim {
-      position: fixed;
+      position: absolute;
       inset: 0;
       z-index: 40;
       background: rgba(0, 0, 0, 0.38);
@@ -2071,7 +2072,7 @@
        5. LEFT DRAWER (#111113, ZERO BORDERS, NO BOTTOM FOOTER)
        ========================================================================== */
     .drawer-backdrop {
-      position: fixed;
+      position: absolute;
       inset: 0;
       z-index: 70;
       background: rgba(0, 0, 0, 0.64);
@@ -2539,7 +2540,7 @@
        BORDERLESS LONG-PRESS CONTEXT MENU (ПЕРЕИМЕНОВАТЬ + PIN)
        ========================================================================== */
     .ctx-backdrop {
-      position: fixed;
+      position: absolute;
       inset: 0;
       z-index: 85;
       background: rgba(0, 0, 0, 0.34);
@@ -2645,7 +2646,7 @@
        BORDERLESS TOAST (NO alert() / confirm())
        ========================================================================== */
     .toast {
-      position: fixed;
+      position: absolute;
       left: 50%;
       bottom: calc(max(24px, env(safe-area-inset-bottom)) + 160px);
       transform: translateX(-50%) translateY(10px);
