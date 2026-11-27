@@ -272,6 +272,31 @@
       }
     }
 
+    /* Frame-0 iOS Standalone PWA full-screen lock (eliminates cold-launch 47pt bottom black strip before app.js loads) */
+    html.ios-standalone:not(.kb-open),
+    html.ios-standalone:not(.kb-open) body {
+      height: var(--pwa-screen-h, 100lvh);
+    }
+
+    html.ios-standalone:not(.kb-open) .app-shell {
+      top: 0;
+      bottom: auto;
+      height: var(--pwa-screen-h, 100lvh);
+    }
+
+    @media (display-mode: standalone) and (max-width: 519px) {
+      html:not(.kb-open),
+      html:not(.kb-open) body {
+        height: var(--pwa-screen-h, 100lvh);
+      }
+
+      html:not(.kb-open) .app-shell {
+        top: 0;
+        bottom: auto;
+        height: var(--pwa-screen-h, 100lvh);
+      }
+    }
+
     /* ==========================================================================
        1. SINGLE-ROW TOP HEADER (Menu | Centered Model+Level | New Chat)
        ========================================================================== */
@@ -1086,15 +1111,16 @@
         #000000;
     }
 
-    /* Silky 13-stop eased black text fade strictly inside current bounds (left/right: 10px, top: -16px, height: 41px -> 25px)
-       so scrolled text melts imperceptibly behind the 65px Persona circle without touching the scrollbar */
+    /* Silky 13-stop eased black text fade shifted up by 7px (~1/6 of 44px Auto TTS):
+       - Fade ramp spans top: -23px to +18px (41px tall), then solid #000000 seals 41px..48px to meet ::before at top: 25px
+       - left/right: 14px hugs the 16px chat text column without touching the native scrollbar */
     .bottom-dock::after {
       content: "";
       position: absolute;
-      left: 10px;
-      right: 10px;
-      top: -16px;
-      height: 41px;
+      left: 14px;
+      right: 14px;
+      top: -23px;
+      height: 48px;
       z-index: -1;
       pointer-events: none;
       background: linear-gradient(
@@ -1111,7 +1137,8 @@
         rgba(0, 0, 0, 0.864) 30.8px,
         rgba(0, 0, 0, 0.941) 34.2px,
         rgba(0, 0, 0, 0.986) 37.6px,
-        #000000 41px
+        #000000 41px,
+        #000000 100%
       );
     }
 
@@ -1171,7 +1198,7 @@
       display: flex;
       align-items: flex-end;
       gap: var(--t2-gap);
-      padding: 0 10px;
+      padding: 0 16px;
       margin-bottom: 7.5px;
       width: 100%;
       pointer-events: none;
@@ -1405,7 +1432,7 @@
     @media (max-width: 380px) {
       .tier2-row {
         --t2-gap: 5px;
-        padding: 0 8px;
+        padding: 0 16px;
       }
       .t2-mode-pill {
         width: 48px;
@@ -1444,8 +1471,8 @@
 
     .slide-panel {
       position: absolute;
-      left: 10px;
-      right: 10px;
+      left: 16px;
+      right: 16px;
       bottom: var(--panels-bottom);
       display: flex;
       flex-direction: column;
@@ -1879,7 +1906,7 @@
        ========================================================================== */
     .composer-capsule {
       pointer-events: auto;
-      margin: 0 10px;
+      margin: 0 16px;
       min-height: 72px;
       border-radius: 36px;
       background-color: var(--surface-composer);
@@ -2799,6 +2826,32 @@
       -webkit-overflow-scrolling: touch;
     }
   </style>
+  <script>
+    (function () {
+      /* Synchronous pre-body iOS Standalone PWA lock: runs before first paint, zero dependency on safe-area or visualViewport */
+      try {
+        var isStandalone = Boolean(
+          window.navigator.standalone === true ||
+          (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+        );
+        if (!isStandalone || !window.screen) return;
+        var sw = Math.round(window.screen.width || 0);
+        var sh = Math.round(window.screen.height || 0);
+        var minDim = Math.min(sw, sh);
+        var maxDim = Math.max(sw, sh);
+        if (minDim <= 0 || maxDim <= 0 || minDim >= 600) return;
+        var isLand = Boolean(
+          (window.matchMedia && window.matchMedia('(orientation: landscape)').matches) ||
+          (window.innerWidth > 0 && window.innerHeight > 0 && window.innerWidth > window.innerHeight)
+        );
+        var screenH = isLand ? minDim : maxDim;
+        var root = document.documentElement;
+        root.style.setProperty('--pwa-screen-h', screenH + 'px');
+        root.style.height = screenH + 'px';
+        root.classList.add('ios-standalone');
+      } catch (_) {}
+    })();
+  </script>
 </head>
 <body>
   <div class="app-shell" id="appShell">
@@ -3054,7 +3107,7 @@
     <div class="drawer-backdrop" id="drawerBackdrop"></div>
     <aside class="drawer" id="drawer" aria-hidden="true">
       <div class="drawer-top-bar">
-        <div class="drawer-brand">OpenRouter <span>PWA</span></div>
+        <div class="drawer-brand">OpenRouter <span>V 1.10</span></div>
         <button class="drawer-close-btn" id="closeDrawerBtn" aria-label="Закрыть меню">
           <svg viewBox="0 0 24 24">
             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -3179,38 +3232,6 @@
 
   <script>
     (function () {
-      /* Synchronous pre-paint iOS Standalone PWA viewport lock (eliminates cold-launch bottom black bar flash before app.js loads) */
-      try {
-        var isStandalone = Boolean(
-          window.navigator.standalone === true ||
-          (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
-        );
-        if (isStandalone && window.screen) {
-          var sw = Math.round(window.screen.width || 0);
-          var sh = Math.round(window.screen.height || 0);
-          var isLand = window.innerWidth > window.innerHeight;
-          var screenW = isLand ? Math.max(sw, sh) : Math.min(sw, sh);
-          var screenH = isLand ? Math.min(sw, sh) : Math.max(sw, sh);
-          var vv = window.visualViewport;
-          var vh = vv ? Math.round(vv.height) : window.innerHeight;
-          var hdr = document.getElementById('topHeader');
-          var safeTop = hdr ? Math.round(parseFloat(window.getComputedStyle(hdr).paddingTop) || 0) : 0;
-          var deficit = screenH - vh;
-          var widthMatches = screenW > 0 && Math.abs(window.innerWidth - screenW) <= 4;
-          if (widthMatches && safeTop >= 20 && screenH > 0 && deficit >= 0 && deficit <= safeTop + 20) {
-            document.documentElement.style.height = screenH + 'px';
-            document.body.style.height = screenH + 'px';
-            var shell = document.getElementById('appShell');
-            if (shell) {
-              shell.style.position = 'fixed';
-              shell.style.top = '0px';
-              shell.style.bottom = 'auto';
-              shell.style.height = screenH + 'px';
-            }
-          }
-        }
-      } catch (_) {}
-
       var s = document.createElement('script');
       s.src = './app.js?v=' + Date.now();
       document.body.appendChild(s);
