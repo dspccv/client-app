@@ -1053,9 +1053,10 @@
       flex-direction: column;
     }
 
-    /* Single pure black bottom fade (max 40% opacity at bottom, no gray/white haze) */
+    /* Single pure black bottom fade (temporarily hidden, kept intact for reuse) */
     .bottom-dock::before {
       content: "";
+      display: none;
       position: absolute;
       left: 0;
       right: 0;
@@ -1072,8 +1073,9 @@
       );
     }
 
-    /* Flat dark semi-transparent plaque flush with 44px row + composer (Persona protrudes above) */
+    /* Flat dark semi-transparent plaque (70% opacity) extending outward by --t2-gap (6px / 5px) */
     .dock-surface {
+      --dock-pad: 6px;
       position: relative;
       width: 100%;
       display: flex;
@@ -1084,19 +1086,19 @@
     .dock-surface::before {
       content: "";
       position: absolute;
-      left: 10px;
-      right: 10px;
-      top: 17px;
-      bottom: 0;
+      left: calc(10px - var(--dock-pad));
+      right: calc(10px - var(--dock-pad));
+      top: calc(17px - var(--dock-pad));
+      bottom: calc(-1 * var(--dock-pad));
       z-index: 0;
-      border-radius: 22px 22px 36px 36px;
-      background-color: rgba(22, 23, 28, 0.40);
+      border-radius: calc(22px + var(--dock-pad)) calc(22px + var(--dock-pad)) calc(36px + var(--dock-pad)) calc(36px + var(--dock-pad));
+      background-color: rgba(22, 23, 28, 0.70);
       pointer-events: none;
       transition: border-radius 0.18s cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     .dock-surface:has(.composer-capsule.is-expanded)::before {
-      border-radius: 22px 22px 26px 26px;
+      border-radius: calc(22px + var(--dock-pad)) calc(22px + var(--dock-pad)) calc(26px + var(--dock-pad)) calc(26px + var(--dock-pad));
     }
 
     .dock-surface > * {
@@ -1392,6 +1394,13 @@
     }
 
     @media (max-width: 380px) {
+      .dock-surface {
+        --dock-pad: 5px;
+      }
+      .dock-surface::before {
+        left: 3px;
+        right: 3px;
+      }
       .tier2-row {
         --t2-gap: 5px;
         padding: 0 8px;
