@@ -773,7 +773,7 @@
       overscroll-behavior-y: contain;
       touch-action: pan-y;
       background-color: var(--bg);
-      padding: 8px 16px 45px;
+      padding: 8px 16px 38px;
       display: flex;
       flex-direction: column;
       gap: 20px;
@@ -1046,7 +1046,7 @@
     }
 
     .bottom-dock {
-      position: fixed;
+      position: absolute;
       left: 0;
       right: 0;
       bottom: 0;
@@ -1059,7 +1059,7 @@
       flex-direction: column;
     }
 
-    /* Full-width cool whitish-slate gradient plaque starting flush at top of 44px button row (top: 32px = bottom of .chat-feed):
+    /* Full-width cool whitish-slate gradient plaque starting flush at top of 44px button row (top: 25px = bottom of .chat-feed):
        - +15% more whitish at very bottom (0.455) with steeper drop-off upward from bottom edge,
          smoothly melting into #000000 around the 50% midline of upper buttons -> never overlaps native iOS scrollbar */
     .bottom-dock::before {
@@ -1067,7 +1067,7 @@
       position: absolute;
       left: 0;
       right: 0;
-      top: 32px;
+      top: 25px;
       bottom: 0;
       z-index: -1;
       pointer-events: none;
@@ -1086,32 +1086,32 @@
         #000000;
     }
 
-    /* Silky 13-stop eased black text fade strictly inside current bounds (left/right: 10px, top: -16px, height: 48px -> 32px)
-       so scrolled text melts imperceptibly behind the 72px Persona circle without touching the scrollbar */
+    /* Silky 13-stop eased black text fade strictly inside current bounds (left/right: 10px, top: -16px, height: 41px -> 25px)
+       so scrolled text melts imperceptibly behind the 65px Persona circle without touching the scrollbar */
     .bottom-dock::after {
       content: "";
       position: absolute;
       left: 10px;
       right: 10px;
       top: -16px;
-      height: 48px;
+      height: 41px;
       z-index: -1;
       pointer-events: none;
       background: linear-gradient(
         to bottom,
         rgba(0, 0, 0, 0) 0px,
-        rgba(0, 0, 0, 0.014) 4px,
-        rgba(0, 0, 0, 0.059) 8px,
-        rgba(0, 0, 0, 0.136) 12px,
-        rgba(0, 0, 0, 0.240) 16px,
-        rgba(0, 0, 0, 0.365) 20px,
-        rgba(0, 0, 0, 0.500) 24px,
-        rgba(0, 0, 0, 0.635) 28px,
-        rgba(0, 0, 0, 0.760) 32px,
-        rgba(0, 0, 0, 0.864) 36px,
-        rgba(0, 0, 0, 0.941) 40px,
-        rgba(0, 0, 0, 0.986) 44px,
-        #000000 48px
+        rgba(0, 0, 0, 0.014) 3.4px,
+        rgba(0, 0, 0, 0.059) 6.8px,
+        rgba(0, 0, 0, 0.136) 10.2px,
+        rgba(0, 0, 0, 0.240) 13.7px,
+        rgba(0, 0, 0, 0.365) 17.1px,
+        rgba(0, 0, 0, 0.500) 20.5px,
+        rgba(0, 0, 0, 0.635) 23.9px,
+        rgba(0, 0, 0, 0.760) 27.3px,
+        rgba(0, 0, 0, 0.864) 30.8px,
+        rgba(0, 0, 0, 0.941) 34.2px,
+        rgba(0, 0, 0, 0.986) 37.6px,
+        #000000 41px
       );
     }
 
@@ -1232,20 +1232,20 @@
       font-weight: 500;
     }
 
-    /* Circular 72x72 Persona / Agent Avatar Button (matching 72px composer capsule height) */
+    /* Circular 65x65 Persona / Agent Avatar Button (-10% from 72px) */
     .t2-persona {
-      width: 72px;
-      height: 72px;
-      min-width: 72px;
-      min-height: 72px;
+      width: 65px;
+      height: 65px;
+      min-width: 65px;
+      min-height: 65px;
       padding: 0;
       border-radius: 50%;
       overflow: hidden;
     }
 
     .t2-persona svg {
-      width: 33px;
-      height: 33px;
+      width: 30px;
+      height: 30px;
       flex-shrink: 0;
       stroke: currentColor;
       fill: none;
@@ -1379,18 +1379,18 @@
       transform: none;
     }
 
-    /* Compact Equal-Width Right Pills: Hands Free & Auto TTS (trimmed slightly to give Scrub Bar room for 72px Persona) */
+    /* Compact Equal-Width Right Pills: Hands Free & Auto TTS (widened to 50px alongside wider Scrub Bar) */
     .t2-mode-pill {
-      width: 48px;
-      min-width: 48px;
+      width: 50px;
+      min-width: 50px;
       height: var(--menu-item-h);
       min-height: var(--menu-item-h);
-      padding: 0 4px;
+      padding: 0 5px;
       border-radius: 9999px;
-      font-size: 10.5px;
+      font-size: 11px;
       font-weight: 500;
-      line-height: 1.05;
-      letter-spacing: -0.015em;
+      line-height: 1.06;
+      letter-spacing: -0.012em;
       text-align: center;
       white-space: normal;
       flex-direction: column;
@@ -1399,7 +1399,7 @@
 
     .t2-mode-label {
       display: block;
-      line-height: 1.06;
+      line-height: 1.07;
     }
 
     @media (max-width: 380px) {
@@ -1408,10 +1408,10 @@
         padding: 0 8px;
       }
       .t2-mode-pill {
-        width: 46px;
-        min-width: 46px;
-        font-size: 10px;
-        padding: 0 3px;
+        width: 48px;
+        min-width: 48px;
+        font-size: 10.5px;
+        padding: 0 4px;
       }
       .t2-scrub-btn {
         width: 30px;
@@ -1425,7 +1425,7 @@
        4B & 4C. DECOUPLED FLOATING OVERLAY PANELS LAYER (z-index: 55)
        ========================================================================== */
     .floating-panels-layer {
-      position: fixed;
+      position: absolute;
       left: 0;
       right: 0;
       top: 0;
@@ -2678,7 +2678,7 @@
     .toast {
       position: absolute;
       left: 50%;
-      bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 186px);
+      bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 179px);
       transform: translateX(-50%) translateY(10px);
       z-index: 95;
       background-color: #282b33;
@@ -3179,6 +3179,38 @@
 
   <script>
     (function () {
+      /* Synchronous pre-paint iOS Standalone PWA viewport lock (eliminates cold-launch bottom black bar flash before app.js loads) */
+      try {
+        var isStandalone = Boolean(
+          window.navigator.standalone === true ||
+          (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+        );
+        if (isStandalone && window.screen) {
+          var sw = Math.round(window.screen.width || 0);
+          var sh = Math.round(window.screen.height || 0);
+          var isLand = window.innerWidth > window.innerHeight;
+          var screenW = isLand ? Math.max(sw, sh) : Math.min(sw, sh);
+          var screenH = isLand ? Math.min(sw, sh) : Math.max(sw, sh);
+          var vv = window.visualViewport;
+          var vh = vv ? Math.round(vv.height) : window.innerHeight;
+          var hdr = document.getElementById('topHeader');
+          var safeTop = hdr ? Math.round(parseFloat(window.getComputedStyle(hdr).paddingTop) || 0) : 0;
+          var deficit = screenH - vh;
+          var widthMatches = screenW > 0 && Math.abs(window.innerWidth - screenW) <= 4;
+          if (widthMatches && safeTop >= 20 && screenH > 0 && deficit >= 0 && deficit <= safeTop + 20) {
+            document.documentElement.style.height = screenH + 'px';
+            document.body.style.height = screenH + 'px';
+            var shell = document.getElementById('appShell');
+            if (shell) {
+              shell.style.position = 'fixed';
+              shell.style.top = '0px';
+              shell.style.bottom = 'auto';
+              shell.style.height = screenH + 'px';
+            }
+          }
+        }
+      } catch (_) {}
+
       var s = document.createElement('script');
       s.src = './app.js?v=' + Date.now();
       document.body.appendChild(s);
