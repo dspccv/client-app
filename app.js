@@ -58,6 +58,49 @@
     { id: 'elevenlabs-byok', name: 'ElevenLabs BYOK', usdPer1MChars: 0 }
   ];
 
+  const TTS_SAMPLING_DEFAULTS = {
+    temperature: 1.00,
+    topP: 0.95,
+    topK: 40
+  };
+
+  function clampTtsTemperature(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return TTS_SAMPLING_DEFAULTS.temperature;
+    return Math.round(Math.max(0.0, Math.min(2.0, n)) * 100) / 100;
+  }
+
+  function clampTtsTopP(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return TTS_SAMPLING_DEFAULTS.topP;
+    return Math.round(Math.max(0.01, Math.min(1.0, n)) * 100) / 100;
+  }
+
+  function clampTtsTopK(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return TTS_SAMPLING_DEFAULTS.topK;
+    return Math.round(Math.max(1, Math.min(100, n)));
+  }
+
+  function ttsModelSupportsSamplingParams(ttsId) {
+    return String(ttsId || '').toLowerCase().startsWith('google/gemini-');
+  }
+
+  function getActiveTtsSamplingParams(ttsId) {
+    if (!ttsModelSupportsSamplingParams(ttsId)) return null;
+    const d = state.voiceDraft || {};
+    return {
+      temperature: clampTtsTemperature(d.temperature),
+      topP: clampTtsTopP(d.topP),
+      topK: clampTtsTopK(d.topK)
+    };
+  }
+
+  function formatTtsSamplingKey(params) {
+    if (!params) return '';
+    return `t=${params.temperature.toFixed(2)},p=${params.topP.toFixed(2)},k=${params.topK}`;
+  }
+
   const STT_MODELS = [
     { id: 'openai/whisper-large-v3', name: 'Whisper Large v3', usdPerMin: 0.0015 },
     { id: 'x-ai/grok-stt-2.0', name: 'Grok STT 2.0', usdPerMin: 0.00168 },
@@ -598,12 +641,12 @@
 
     activeVoicePreset: 'Voice 1',
     voicePresets: {
-      'Voice 1': { voice: 'Puck', speed: 1.15, pitch: 1.00 },
-      'Voice 2': { voice: 'Zephyr', speed: 1.25, pitch: 0.96 },
-      'Voice 3': { voice: 'Charon', speed: 1.00, pitch: 0.92 },
-      'Voice 4': { voice: 'Fenrir', speed: 1.10, pitch: 0.88 }
+      'Voice 1': { voice: 'Puck', speed: 1.15, pitch: 1.00, temperature: 1.00, topP: 0.95, topK: 40 },
+      'Voice 2': { voice: 'Zephyr', speed: 1.25, pitch: 0.96, temperature: 1.00, topP: 0.95, topK: 40 },
+      'Voice 3': { voice: 'Charon', speed: 1.00, pitch: 0.92, temperature: 1.00, topP: 0.95, topK: 40 },
+      'Voice 4': { voice: 'Fenrir', speed: 1.10, pitch: 0.88, temperature: 1.00, topP: 0.95, topK: 40 }
     },
-    voiceDraft: { voice: 'Puck', speed: 1.15, pitch: 1.00 },
+    voiceDraft: { voice: 'Puck', speed: 1.15, pitch: 1.00, temperature: 1.00, topP: 0.95, topK: 40 },
 
     activePersonaIndex: 0,
     personas: [
@@ -649,6 +692,7 @@
     ttsPaused: false,
     ttsActiveModelId: null,
     ttsActiveVoiceApiId: null,
+    ttsActiveSamplingKey: '',
     ttsPausedTime: 0,
     ttsPausedDuration: 0,
     ttsPitchChangedWhilePaused: false,
@@ -1802,6 +1846,49 @@
         object-fit: contain;
         box-shadow: 0 12px 40px rgba(0, 0, 0, 0.75);
       }
+
+      /* Gemini TTS sampling sliders (Temperature / Top P / Top K) */
+      .tts-sampling-row {
+        transition: opacity 0.16s ease, filter 0.16s ease;
+      }
+      .tts-sampling-row.is-disabled {
+        opacity: 0.36;
+        filter: saturate(0.25);
+        pointer-events: none;
+      }
+      .tts-sampling-row.is-disabled input[type="range"] {
+        cursor: not-allowed;
+      }
+      .tts-sampling-stack {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .tts-sampling-row.span-full {
+        grid-column: 1 / -1;
+      }
+      .tts-sampling-fallback-row {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .tts-sampling-fallback-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 13px;
+        color: var(--menu-text, #cfd2da);
+      }
+      .tts-sampling-fallback-val {
+        color: var(--text-meta, #8e919a);
+        font-variant-numeric: tabular-nums;
+      }
+      #audioPanel {
+        max-height: calc(100dvh - var(--panels-bottom, 110px) - env(safe-area-inset-top, 12px) - 16px);
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
     `;
     document.head.appendChild(style);
   })();
@@ -2272,6 +2359,7 @@
       chatInput.style.display = 'block';
     }
 
+    syncTtsSamplingSlidersDisabledState();
     updateComposerLayout();
     syncSendButton();
   }
@@ -4080,8 +4168,12 @@
     idbPut('ttsCache', record).then(() => pruneTtsCacheIdb());
   }
 
-  async function fetchTtsChunkCanonicalWav(chunkText, ttsId, voiceApiId, signal) {
-    const cacheKey = `${ttsId}::${voiceApiId}::${chunkText}`;
+  async function fetchTtsChunkCanonicalWav(chunkText, ttsId, voiceApiId, signal, samplingParams = null) {
+    const activeSampling = ttsModelSupportsSamplingParams(ttsId) ? samplingParams : null;
+    const samplingKey = formatTtsSamplingKey(activeSampling);
+    const cacheKey = samplingKey
+      ? `${ttsId}::${voiceApiId}::${samplingKey}::${chunkText}`
+      : `${ttsId}::${voiceApiId}::${chunkText}`;
     const cached = await getTtsCachePersistent(cacheKey);
     if (cached) {
       return cached;
@@ -4151,6 +4243,7 @@
 
       let lastErrDetail = '';
       let lastErrStatus = 0;
+      const droppedSamplingFields = new Set();
 
       for (let aIdx = 0; aIdx < attemptOrder.length; aIdx++) {
         if (signal && signal.aborted) {
@@ -4172,6 +4265,11 @@
         if (chosenFmt) {
           payload.response_format = chosenFmt;
         }
+        if (activeSampling) {
+          if (!droppedSamplingFields.has('temperature')) payload.temperature = activeSampling.temperature;
+          if (!droppedSamplingFields.has('top_p')) payload.top_p = activeSampling.topP;
+          if (!droppedSamplingFields.has('top_k')) payload.top_k = activeSampling.topK;
+        }
 
         resp = await fetch(url, {
           method: 'POST',
@@ -4192,6 +4290,37 @@
         lastErrStatus = resp.status;
         lastErrDetail = await parseResponseErrorText(resp);
         const lowerErr = String(lastErrDetail || '').toLowerCase();
+
+        // If upstream rejects a sampling param (e.g. top_k/top_p/temperature), drop it and retry same format
+        if (
+          activeSampling &&
+          droppedSamplingFields.size < 3 &&
+          (resp.status === 400 || resp.status === 422)
+        ) {
+          let droppedAny = false;
+          if (lowerErr.includes('top_k') || lowerErr.includes('topk')) {
+            if (!droppedSamplingFields.has('top_k')) { droppedSamplingFields.add('top_k'); droppedAny = true; }
+          }
+          if (lowerErr.includes('top_p') || lowerErr.includes('topp')) {
+            if (!droppedSamplingFields.has('top_p')) { droppedSamplingFields.add('top_p'); droppedAny = true; }
+          }
+          if (lowerErr.includes('temperature')) {
+            if (!droppedSamplingFields.has('temperature')) { droppedSamplingFields.add('temperature'); droppedAny = true; }
+          }
+          if (
+            !droppedAny &&
+            (lowerErr.includes('unrecognized') || lowerErr.includes('unknown field') || lowerErr.includes('extra_forbidden') || lowerErr.includes('additional properties'))
+          ) {
+            ['temperature', 'top_p', 'top_k'].forEach((k) => {
+              if (!droppedSamplingFields.has(k)) { droppedSamplingFields.add(k); droppedAny = true; }
+            });
+          }
+          if (droppedAny) {
+            aIdx -= 1;
+            continue;
+          }
+        }
+
         const isFormatRejection =
           (resp.status === 400 || resp.status === 415 || resp.status === 422) &&
           (
@@ -4276,6 +4405,7 @@
     state.ttsPaused = false;
     state.ttsActiveModelId = null;
     state.ttsActiveVoiceApiId = null;
+    state.ttsActiveSamplingKey = '';
     state.ttsPausedTime = 0;
     state.ttsPausedDuration = 0;
     state.ttsPitchChangedWhilePaused = false;
@@ -4351,8 +4481,13 @@
     if (!state.ttsPlayingMsgId || !state.ttsPaused || !state.ttsCurrentChunk) return false;
 
     const currentVoiceApiId = resolveVoiceApiId(state.ttsId, state.voiceDraft.voice);
-    // Restart from beginning ONLY if model or voice changed (requiring a new TTS request)
-    if (state.ttsActiveModelId !== state.ttsId || state.ttsActiveVoiceApiId !== currentVoiceApiId) {
+    const currentSamplingKey = formatTtsSamplingKey(getActiveTtsSamplingParams(state.ttsId));
+    // Restart from beginning ONLY if model, voice, or Gemini sampling params changed (requiring a new TTS request)
+    if (
+      state.ttsActiveModelId !== state.ttsId ||
+      state.ttsActiveVoiceApiId !== currentVoiceApiId ||
+      state.ttsActiveSamplingKey !== currentSamplingKey
+    ) {
       return false;
     }
 
@@ -4519,6 +4654,8 @@
 
     const ttsId = state.ttsId;
     const voiceApiId = resolveVoiceApiId(ttsId, state.voiceDraft.voice);
+    const samplingParams = getActiveTtsSamplingParams(ttsId);
+    const samplingKey = formatTtsSamplingKey(samplingParams);
 
     const sessionId = ++state.ttsSessionId;
     const controller = new AbortController();
@@ -4527,6 +4664,7 @@
     state.ttsPaused = false;
     state.ttsActiveModelId = ttsId;
     state.ttsActiveVoiceApiId = voiceApiId;
+    state.ttsActiveSamplingKey = samplingKey;
     state.ttsPausedTime = 0;
     state.ttsPausedDuration = 0;
     state.ttsPitchChangedWhilePaused = false;
@@ -4542,7 +4680,7 @@
         if (idx < 0 || idx >= chunks.length) return null;
         if (state.ttsSessionId !== sessionId) return null;
         if (!chunkBuffer[idx]) {
-          const p = fetchTtsChunkCanonicalWav(chunks[idx], ttsId, voiceApiId, controller.signal);
+          const p = fetchTtsChunkCanonicalWav(chunks[idx], ttsId, voiceApiId, controller.signal, samplingParams);
           p.catch(() => {});
           chunkBuffer[idx] = p;
         }
@@ -4582,6 +4720,7 @@
         state.ttsPaused = false;
         state.ttsActiveModelId = null;
         state.ttsActiveVoiceApiId = null;
+        state.ttsActiveSamplingKey = '';
         state.ttsPausedTime = 0;
         state.ttsPausedDuration = 0;
         state.ttsPitchChangedWhilePaused = false;
@@ -5455,9 +5594,263 @@
   }
 
   /* =========================================================================
-     4B. AUDIO (VOICE & MIC) PANEL LOGIC
+     4B. AUDIO (VOICE & MIC) PANEL LOGIC (+ GEMINI TEMPERATURE / TOP P / TOP K)
      ========================================================================= */
+  let ttsTempSlider = null;
+  let ttsTopPSlider = null;
+  let ttsTopKSlider = null;
+  let ttsTempVal = null;
+  let ttsTopPVal = null;
+  let ttsTopKVal = null;
+  let ttsSamplingEntries = [];
+
+  function findSliderBlockContainer(sliderEl, valEl, siblingSliderEl) {
+    if (!sliderEl || !audioPanel) return null;
+    let node = sliderEl.parentElement;
+    while (node && node !== audioPanel) {
+      const hasVal = !valEl || node.contains(valEl);
+      const hasSibling = siblingSliderEl && node.contains(siblingSliderEl);
+      if (hasVal && !hasSibling) return node;
+      if (hasSibling) break;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function updateClonedSliderLabel(clone, newLabel, newSliderId) {
+    const lbl = clone.querySelector('label');
+    if (lbl) {
+      if (lbl.htmlFor === 'pitchSlider') lbl.htmlFor = newSliderId;
+      let updated = false;
+      lbl.childNodes.forEach((n) => {
+        if (n.nodeType === 3 && n.textContent.trim()) {
+          n.textContent = newLabel;
+          updated = true;
+        }
+      });
+      if (!updated) {
+        const innerSpan = Array.from(lbl.querySelectorAll('span')).find(
+          (sp) => sp.dataset.ttsSamplingVal !== '1' && sp.id !== newSliderId
+        );
+        if (innerSpan) {
+          innerSpan.textContent = newLabel;
+          updated = true;
+        }
+      }
+      if (updated) return;
+    }
+
+    const walker = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT, null);
+    let textNode;
+    while ((textNode = walker.nextNode())) {
+      const txt = (textNode.textContent || '').trim();
+      if (!txt) continue;
+      const p = textNode.parentElement;
+      if (p && (p.dataset.ttsSamplingVal === '1' || p.id === 'pitchVal')) continue;
+      if (/pitch|питч|тон/i.test(txt)) {
+        textNode.textContent = newLabel;
+        return;
+      }
+    }
+
+    const fallbackEl = Array.from(clone.querySelectorAll('span, div, p')).find(
+      (el) => el.children.length === 0 && el.dataset.ttsSamplingVal !== '1' && el.textContent.trim().length > 0
+    );
+    if (fallbackEl) {
+      fallbackEl.textContent = newLabel;
+    }
+  }
+
+  function ensureTtsSamplingSliders() {
+    if (ttsTempSlider || !audioPanel || !pitchSlider) return;
+
+    const specs = [
+      {
+        key: 'temperature',
+        sliderId: 'ttsTempSlider',
+        valId: 'ttsTempVal',
+        label: 'Temperature',
+        min: '0.00',
+        max: '2.00',
+        step: '0.05',
+        getVal: () => clampTtsTemperature(state.voiceDraft.temperature),
+        setVal: (raw) => { state.voiceDraft.temperature = clampTtsTemperature(raw); },
+        format: (v) => clampTtsTemperature(v).toFixed(2)
+      },
+      {
+        key: 'topP',
+        sliderId: 'ttsTopPSlider',
+        valId: 'ttsTopPVal',
+        label: 'Top P',
+        min: '0.01',
+        max: '1.00',
+        step: '0.01',
+        getVal: () => clampTtsTopP(state.voiceDraft.topP),
+        setVal: (raw) => { state.voiceDraft.topP = clampTtsTopP(raw); },
+        format: (v) => clampTtsTopP(v).toFixed(2)
+      },
+      {
+        key: 'topK',
+        sliderId: 'ttsTopKSlider',
+        valId: 'ttsTopKVal',
+        label: 'Top K',
+        min: '1',
+        max: '100',
+        step: '1',
+        getVal: () => clampTtsTopK(state.voiceDraft.topK),
+        setVal: (raw) => { state.voiceDraft.topK = clampTtsTopK(raw); },
+        format: (v) => String(clampTtsTopK(v))
+      }
+    ];
+
+    const pitchBlock = findSliderBlockContainer(pitchSlider, pitchVal, speedSlider);
+    const parentEl = pitchBlock ? pitchBlock.parentElement : null;
+    const parentCS = parentEl ? window.getComputedStyle(parentEl) : null;
+    const gtc = parentCS ? String(parentCS.gridTemplateColumns || '').trim() : '';
+    const gridColCount = gtc && gtc !== 'none'
+      ? (gtc.includes('repeat(2') ? 2 : gtc.split(/\s+/).length)
+      : 1;
+    const isTwoColGrid =
+      Boolean(parentCS) &&
+      (parentCS.display === 'grid' || parentCS.display === 'inline-grid') &&
+      gridColCount === 2;
+    const isFlexRowNoWrap =
+      Boolean(parentCS) &&
+      (parentCS.display === 'flex' || parentCS.display === 'inline-flex') &&
+      parentCS.flexDirection.startsWith('row') &&
+      parentCS.flexWrap === 'nowrap';
+
+    const buildRowFromSpec = (spec) => {
+      let rowEl;
+      let sliderEl;
+      let valEl;
+
+      if (pitchBlock) {
+        rowEl = pitchBlock.cloneNode(true);
+        rowEl.classList.add('tts-sampling-row');
+        rowEl.dataset.ttsSamplingRow = spec.key;
+
+        valEl = rowEl.querySelector('#pitchVal');
+        if (valEl) {
+          valEl.id = spec.valId;
+          valEl.dataset.ttsSamplingVal = '1';
+          valEl.textContent = spec.format(spec.getVal());
+        }
+
+        sliderEl = rowEl.querySelector('#pitchSlider') || rowEl.querySelector('input[type="range"]');
+        if (sliderEl) {
+          sliderEl.id = spec.sliderId;
+          sliderEl.min = spec.min;
+          sliderEl.max = spec.max;
+          sliderEl.step = spec.step;
+          sliderEl.value = spec.format(spec.getVal());
+          sliderEl.setAttribute('aria-label', spec.label);
+        }
+
+        updateClonedSliderLabel(rowEl, spec.label, spec.sliderId);
+      } else {
+        rowEl = document.createElement('div');
+        rowEl.className = 'tts-sampling-row tts-sampling-fallback-row';
+        rowEl.dataset.ttsSamplingRow = spec.key;
+
+        const head = document.createElement('div');
+        head.className = 'tts-sampling-fallback-head';
+        const lbl = document.createElement('label');
+        lbl.htmlFor = spec.sliderId;
+        lbl.textContent = spec.label;
+        valEl = document.createElement('span');
+        valEl.id = spec.valId;
+        valEl.className = 'tts-sampling-fallback-val';
+        valEl.dataset.ttsSamplingVal = '1';
+        valEl.textContent = spec.format(spec.getVal());
+        head.appendChild(lbl);
+        head.appendChild(valEl);
+
+        sliderEl = document.createElement('input');
+        sliderEl.type = 'range';
+        sliderEl.id = spec.sliderId;
+        if (pitchSlider.className) sliderEl.className = pitchSlider.className;
+        sliderEl.min = spec.min;
+        sliderEl.max = spec.max;
+        sliderEl.step = spec.step;
+        sliderEl.value = spec.format(spec.getVal());
+        sliderEl.setAttribute('aria-label', spec.label);
+
+        rowEl.appendChild(head);
+        rowEl.appendChild(sliderEl);
+      }
+
+      if (sliderEl) {
+        sliderEl.addEventListener('input', () => {
+          if (state.micState !== 'idle' || !ttsModelSupportsSamplingParams(state.ttsId)) return;
+          spec.setVal(parseFloat(sliderEl.value));
+          syncAudioPanelUI();
+        });
+      }
+
+      return { spec, rowEl, sliderEl, valEl };
+    };
+
+    const created = specs.map(buildRowFromSpec);
+    ttsSamplingEntries = created;
+
+    if (pitchBlock && isFlexRowNoWrap && parentEl) {
+      const stack = document.createElement('div');
+      stack.className = 'tts-sampling-stack';
+      stack.id = 'ttsSamplingStack';
+      created.forEach((entry, i) => {
+        if (i === 2) entry.rowEl.classList.add('span-full');
+        stack.appendChild(entry.rowEl);
+      });
+      parentEl.insertAdjacentElement('afterend', stack);
+    } else if (pitchBlock) {
+      let anchor = pitchBlock;
+      created.forEach((entry, i) => {
+        if (isTwoColGrid && i === 2) entry.rowEl.classList.add('span-full');
+        anchor.insertAdjacentElement('afterend', entry.rowEl);
+        anchor = entry.rowEl;
+      });
+    } else {
+      let anchor = pitchSlider.parentElement || audioPanel;
+      created.forEach((entry) => {
+        if (anchor === audioPanel) {
+          audioPanel.appendChild(entry.rowEl);
+        } else {
+          anchor.insertAdjacentElement('afterend', entry.rowEl);
+          anchor = entry.rowEl;
+        }
+      });
+    }
+
+    ttsTempSlider = created[0].sliderEl;
+    ttsTempVal = created[0].valEl;
+    ttsTopPSlider = created[1].sliderEl;
+    ttsTopPVal = created[1].valEl;
+    ttsTopKSlider = created[2].sliderEl;
+    ttsTopKVal = created[2].valEl;
+  }
+
+  function syncTtsSamplingSlidersDisabledState() {
+    if (!ttsSamplingEntries || ttsSamplingEntries.length === 0) return;
+    const supported = ttsModelSupportsSamplingParams(state.ttsId);
+    const isLocked = state.micState !== 'idle';
+    const disabled = !supported || isLocked;
+
+    ttsSamplingEntries.forEach(({ rowEl, sliderEl }) => {
+      if (rowEl) {
+        rowEl.classList.toggle('is-disabled', !supported);
+      }
+      if (sliderEl) {
+        sliderEl.disabled = disabled;
+        if (disabled) sliderEl.setAttribute('aria-disabled', 'true');
+        else sliderEl.removeAttribute('aria-disabled');
+      }
+    });
+  }
+
   function syncAudioPanelUI() {
+    ensureTtsSamplingSliders();
+
     const d = state.voiceDraft;
     const ttsObj = TTS_MODELS.find((t) => t.id === state.ttsId) || TTS_MODELS[0];
     const sttObj = STT_MODELS.find((s) => s.id === state.sttId) || STT_MODELS[0];
@@ -5473,6 +5866,19 @@
     speedVal.textContent = `${d.speed.toFixed(2)}x`;
     pitchVal.textContent = `${d.pitch.toFixed(2)}x`;
 
+    const tempNum = clampTtsTemperature(d.temperature);
+    const topPNum = clampTtsTopP(d.topP);
+    const topKNum = clampTtsTopK(d.topK);
+
+    if (ttsTempSlider) ttsTempSlider.value = tempNum.toFixed(2);
+    if (ttsTempVal) ttsTempVal.textContent = tempNum.toFixed(2);
+    if (ttsTopPSlider) ttsTopPSlider.value = topPNum.toFixed(2);
+    if (ttsTopPVal) ttsTopPVal.textContent = topPNum.toFixed(2);
+    if (ttsTopKSlider) ttsTopKSlider.value = String(topKNum);
+    if (ttsTopKVal) ttsTopKVal.textContent = String(topKNum);
+
+    syncTtsSamplingSlidersDisabledState();
+
     document.querySelectorAll('#voicePresetGroup .panel-preset-btn').forEach((b) => {
       b.classList.toggle('active', b.dataset.voicePreset === state.activeVoicePreset);
     });
@@ -5487,7 +5893,14 @@
       state.activeVoicePreset = btn.dataset.voicePreset;
       const saved = state.voicePresets[state.activeVoicePreset];
       if (saved) {
-        state.voiceDraft = { voice: saved.voice, speed: saved.speed, pitch: saved.pitch };
+        state.voiceDraft = {
+          voice: saved.voice,
+          speed: saved.speed,
+          pitch: saved.pitch,
+          temperature: clampTtsTemperature(saved.temperature),
+          topP: clampTtsTopP(saved.topP),
+          topK: clampTtsTopK(saved.topK)
+        };
       }
       syncAudioPanelUI();
       applyLiveSpeedToPlayingAudio();
@@ -5534,10 +5947,20 @@
   let voiceSaveFlashTimer = null;
   saveVoicePresetBtn.addEventListener('click', () => {
     if (state.micState !== 'idle') return;
+    const tempNum = clampTtsTemperature(state.voiceDraft.temperature);
+    const topPNum = clampTtsTopP(state.voiceDraft.topP);
+    const topKNum = clampTtsTopK(state.voiceDraft.topK);
+    state.voiceDraft.temperature = tempNum;
+    state.voiceDraft.topP = topPNum;
+    state.voiceDraft.topK = topKNum;
+
     state.voicePresets[state.activeVoicePreset] = {
       voice: state.voiceDraft.voice,
       speed: state.voiceDraft.speed,
-      pitch: state.voiceDraft.pitch
+      pitch: state.voiceDraft.pitch,
+      temperature: tempNum,
+      topP: topPNum,
+      topK: topKNum
     };
     persistSettings(true);
     saveVoicePresetBtn.textContent = 'Saved';
@@ -5548,7 +5971,10 @@
       saveVoicePresetBtn.classList.remove('saved');
     }, 1200);
     const vName = resolveVoiceDisplayName(state.ttsId, state.voiceDraft.voice);
-    showToast(`${state.activeVoicePreset}: ${vName} · ${state.voiceDraft.speed.toFixed(2)}x`);
+    const extra = ttsModelSupportsSamplingParams(state.ttsId)
+      ? ` · T ${tempNum.toFixed(2)} / P ${topPNum.toFixed(2)} / K ${topKNum}`
+      : '';
+    showToast(`${state.activeVoicePreset}: ${vName} · ${state.voiceDraft.speed.toFixed(2)}x${extra}`);
   });
 
   /* =========================================================================
@@ -7953,10 +8379,14 @@
       if (s.voicePresets && typeof s.voicePresets === 'object') {
         Object.keys(state.voicePresets).forEach((k) => {
           if (s.voicePresets[k]) {
+            const vp = s.voicePresets[k];
             state.voicePresets[k] = {
-              voice: s.voicePresets[k].voice || state.voicePresets[k].voice,
-              speed: Number(s.voicePresets[k].speed) || 1.0,
-              pitch: Number(s.voicePresets[k].pitch) || 1.0
+              voice: vp.voice || state.voicePresets[k].voice,
+              speed: Number(vp.speed) || 1.0,
+              pitch: Number(vp.pitch) || 1.0,
+              temperature: vp.temperature !== undefined ? clampTtsTemperature(vp.temperature) : TTS_SAMPLING_DEFAULTS.temperature,
+              topP: vp.topP !== undefined ? clampTtsTopP(vp.topP) : TTS_SAMPLING_DEFAULTS.topP,
+              topK: vp.topK !== undefined ? clampTtsTopK(vp.topK) : TTS_SAMPLING_DEFAULTS.topK
             };
           }
         });
@@ -7966,7 +8396,14 @@
       }
       const activeVp = state.voicePresets[state.activeVoicePreset];
       if (activeVp) {
-        state.voiceDraft = { voice: activeVp.voice, speed: activeVp.speed, pitch: activeVp.pitch };
+        state.voiceDraft = {
+          voice: activeVp.voice,
+          speed: activeVp.speed,
+          pitch: activeVp.pitch,
+          temperature: clampTtsTemperature(activeVp.temperature),
+          topP: clampTtsTopP(activeVp.topP),
+          topK: clampTtsTopK(activeVp.topK)
+        };
       }
 
       if (Array.isArray(s.personas) && s.personas.length === 4) {
