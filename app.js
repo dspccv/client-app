@@ -2,7 +2,7 @@
   'use strict';
 
   /* =========================================================================
-     CONSTANTS & CATALOGS (STEP 4.8: STRICT TEXT-ONLY LLM SANITIZER + TOKEN BREAKDOWN)
+     CONSTANTS & CATALOGS (STEP 4.9: FILE UPLOADS + RECORD-TO-SEND + AI IMAGES & LINKS)
      ========================================================================= */
   const DB_NAME = 'OpenRouterPWA_DB';
   const DB_VERSION = 2;
@@ -666,10 +666,12 @@
     streamRafId: null,
 
     isExpanded: false,
+    pendingAttachments: [],
 
     micState: 'idle',
     micStarting: false,
     micCancelPending: false,
+    autoSendAfterTranscribe: false,
     audioSessionRestoreTimer: null,
     recSeconds: 0,
     recStartedAt: 0,
@@ -744,6 +746,9 @@
         text: m.text !== undefined ? m.text : undefined,
         html: m.html !== undefined ? m.html : undefined,
         plainText: m.plainText !== undefined ? m.plainText : undefined,
+        attachments: Array.isArray(m.attachments) && m.attachments.length > 0 ? m.attachments : undefined,
+        images: Array.isArray(m.images) && m.images.length > 0 ? m.images : undefined,
+        citations: Array.isArray(m.citations) && m.citations.length > 0 ? m.citations : undefined,
         usage: m.usage || undefined
       }))
     };
@@ -1530,6 +1535,557 @@
   const measureCtx = measureCanvas.getContext('2d');
 
   /* =========================================================================
+     DYNAMIC STYLES, ATTACHMENTS TRAY & IMAGE LIGHTBOX (NO index.html CHANGES)
+     ========================================================================= */
+  const MAX_PENDING_ATTACHMENTS = 6;
+  const MAX_RAW_FILE_BYTES = 20 * 1024 * 1024;
+  const MAX_PDF_FILE_BYTES = 10 * 1024 * 1024;
+  const MAX_TEXT_FILE_CHARS = 180000;
+
+  (function injectDynamicFeatureStyles() {
+    if (document.getElementById('appDynamicFeatureStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'appDynamicFeatureStyles';
+    style.textContent = `
+      /* Keep Send button fully active & tappable while recording audio */
+      body.mic-recording #btn-send {
+        pointer-events: auto !important;
+        opacity: 1 !important;
+        filter: none !important;
+      }
+
+      /* Composer pending attachments tray */
+      .attach-tray {
+        display: none;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 12px 8px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        pointer-events: auto;
+        scrollbar-width: none;
+      }
+      .attach-tray::-webkit-scrollbar { display: none; }
+      .attach-tray.has-items { display: flex; }
+
+      .attach-item {
+        position: relative;
+        flex-shrink: 0;
+        border-radius: 12px;
+        background: var(--menu-bg, #1e1f24);
+        color: var(--menu-active-text, #f1f3f5);
+        overflow: visible;
+      }
+      .attach-item.is-image {
+        width: 58px;
+        height: 58px;
+      }
+      .attach-item-thumb {
+        width: 58px;
+        height: 58px;
+        border-radius: 12px;
+        object-fit: cover;
+        display: block;
+        cursor: zoom-in;
+      }
+      .attach-item.is-file {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        max-width: 196px;
+        height: 46px;
+        padding: 0 28px 0 11px;
+      }
+      .attach-file-badge {
+        flex-shrink: 0;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        padding: 3px 6px;
+        border-radius: 6px;
+        background: var(--surface-composer, #2e3038);
+        color: var(--menu-active-text, #f1f3f5);
+        letter-spacing: 0.03em;
+      }
+      .attach-file-meta {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .attach-file-name {
+        font-size: 12.5px;
+        color: var(--menu-active-text, #f1f3f5);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .attach-file-size {
+        font-size: 11px;
+        color: var(--text-meta, #8e919a);
+      }
+      .attach-remove-btn {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        width: 20px;
+        height: 20px;
+        border-radius: 9999px;
+        background: var(--surface-composer, #2e3038);
+        color: var(--menu-active-text, #f1f3f5);
+        font-size: 13px;
+        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+      }
+
+      /* User message attachments inside chat bubble */
+      .msg-attachments-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .msg-attachments-row.only-attachments {
+        margin-bottom: 0;
+      }
+      .msg-att-img {
+        display: block;
+        max-width: min(220px, 100%);
+        max-height: 220px;
+        border-radius: 12px;
+        object-fit: cover;
+        cursor: zoom-in;
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .msg-att-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        max-width: 100%;
+        padding: 6px 10px;
+        border-radius: 10px;
+        background: var(--menu-dark, #15161a);
+        color: var(--menu-text, #d5d7dd);
+        font-size: 12.5px;
+      }
+      .msg-att-chip-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 185px;
+      }
+
+      /* AI links, markdown images, generated image gallery & citations */
+      .ai-content a.md-link {
+        color: #8ab4f8;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .ai-content .md-img-wrap {
+        display: block;
+        margin: 10px 0;
+      }
+      .ai-content img.md-img,
+      .ai-images-grid img.ai-img-el {
+        display: block;
+        max-width: 100%;
+        max-height: 52dvh;
+        width: auto;
+        height: auto;
+        border-radius: 14px;
+        object-fit: contain;
+        background: rgba(255, 255, 255, 0.04);
+        cursor: zoom-in;
+      }
+      .ai-images-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 10px;
+      }
+      .md-img-fallback {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 11px;
+        border-radius: 10px;
+        background: var(--menu-bg, #1e1f24);
+        color: #8ab4f8;
+        font-size: 13px;
+        text-decoration: none;
+        margin: 6px 0;
+      }
+      .ai-citations-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 10px;
+      }
+      .ai-citation-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        max-width: 100%;
+        padding: 5px 10px;
+        border-radius: 9999px;
+        background: var(--menu-bg, #1e1f24);
+        color: var(--menu-text, #cfd2da);
+        font-size: 12px;
+        text-decoration: none;
+      }
+      .ai-citation-chip span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 210px;
+      }
+
+      /* Fullscreen image lightbox (iOS-safe for both https:// and data:image/...) */
+      .img-lightbox {
+        position: fixed;
+        inset: 0;
+        z-index: 220;
+        background: rgba(0, 0, 0, 0.92);
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: calc(env(safe-area-inset-top, 16px) + 52px) 14px calc(env(safe-area-inset-bottom, 16px) + 20px);
+      }
+      .img-lightbox.open { display: flex; }
+      .img-lightbox-bar {
+        position: absolute;
+        top: calc(env(safe-area-inset-top, 12px) + 10px);
+        left: 14px;
+        right: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .img-lightbox-title {
+        font-size: 13px;
+        color: var(--menu-text, #cfd2da);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+      .img-lightbox-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .img-lightbox-btn {
+        height: 34px;
+        padding: 0 13px;
+        border-radius: 9999px;
+        background: var(--surface-composer, #2e3038);
+        color: var(--menu-active-text, #f1f3f5);
+        font-size: 13px;
+        font-weight: 500;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .img-lightbox-img {
+        max-width: 100%;
+        max-height: 100%;
+        border-radius: 12px;
+        object-fit: contain;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.75);
+      }
+    `;
+    document.head.appendChild(style);
+  })();
+
+  const attachFileInput = document.createElement('input');
+  attachFileInput.type = 'file';
+  attachFileInput.id = 'attachFileInput';
+  attachFileInput.multiple = true;
+  attachFileInput.style.display = 'none';
+  appShell.appendChild(attachFileInput);
+
+  const attachTrayEl = document.createElement('div');
+  attachTrayEl.className = 'attach-tray';
+  attachTrayEl.id = 'attachTray';
+  if (composerCapsule && composerCapsule.parentNode) {
+    composerCapsule.parentNode.insertBefore(attachTrayEl, composerCapsule);
+  }
+
+  const imgLightboxEl = document.createElement('div');
+  imgLightboxEl.className = 'img-lightbox';
+  imgLightboxEl.id = 'imgLightbox';
+  imgLightboxEl.innerHTML = `
+    <div class="img-lightbox-bar">
+      <div class="img-lightbox-title" id="imgLightboxTitle"></div>
+      <div class="img-lightbox-actions">
+        <a class="img-lightbox-btn" id="imgLightboxOpenBtn" target="_blank" rel="noopener noreferrer">Открыть</a>
+        <button class="img-lightbox-btn" id="imgLightboxCloseBtn" type="button">Закрыть</button>
+      </div>
+    </div>
+    <img class="img-lightbox-img" id="imgLightboxImg" alt="">
+  `;
+  document.body.appendChild(imgLightboxEl);
+
+  const imgLightboxTitle = document.getElementById('imgLightboxTitle');
+  const imgLightboxOpenBtn = document.getElementById('imgLightboxOpenBtn');
+  const imgLightboxCloseBtn = document.getElementById('imgLightboxCloseBtn');
+  const imgLightboxImg = document.getElementById('imgLightboxImg');
+
+  function openImageLightbox(src, title = '') {
+    if (!src) return;
+    imgLightboxImg.src = src;
+    imgLightboxImg.alt = title || 'Изображение';
+    imgLightboxTitle.textContent = title || 'Изображение';
+    if (/^https?:\/\//i.test(src)) {
+      imgLightboxOpenBtn.href = src;
+      imgLightboxOpenBtn.removeAttribute('download');
+      imgLightboxOpenBtn.textContent = 'Открыть ↗';
+      imgLightboxOpenBtn.style.display = 'inline-flex';
+    } else if (/^data:image\//i.test(src)) {
+      imgLightboxOpenBtn.href = src;
+      imgLightboxOpenBtn.setAttribute('download', (title || 'image').replace(/[^\w.-]+/g, '_') + '.png');
+      imgLightboxOpenBtn.textContent = 'Скачать';
+      imgLightboxOpenBtn.style.display = 'inline-flex';
+    } else {
+      imgLightboxOpenBtn.style.display = 'none';
+    }
+    imgLightboxEl.classList.add('open');
+  }
+
+  function closeImageLightbox() {
+    imgLightboxEl.classList.remove('open');
+    imgLightboxImg.removeAttribute('src');
+  }
+
+  imgLightboxCloseBtn.addEventListener('click', closeImageLightbox);
+  imgLightboxEl.addEventListener('click', (e) => {
+    if (e.target === imgLightboxEl) closeImageLightbox();
+  });
+
+  function formatFileSizeShort(bytes) {
+    const b = Number(bytes) || 0;
+    if (b < 1024) return `${b} Б`;
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(b < 10240 ? 1 : 0)} КБ`;
+    return `${(b / (1024 * 1024)).toFixed(1)} МБ`;
+  }
+
+  const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif|bmp|heic|heif|avif|svg)$/i;
+  const TEXT_EXT_RE = /\.(?:txt|md|markdown|json|csv|tsv|xml|ya?ml|html?|css|scss|less|js|mjs|cjs|jsx|ts|tsx|py|sh|bash|zsh|sql|log|ini|cfg|conf|toml|env|c|cc|cpp|h|hpp|cs|java|kt|swift|go|rs|rb|php|lua|r|tex|gitignore|dockerfile|makefile)$/i;
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Ошибка чтения файла'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function compressImageFileToDataUrl(file, maxSide = 1536, quality = 0.84) {
+    return new Promise((resolve, reject) => {
+      if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
+        readFileAsDataUrl(file).then(resolve, reject);
+        return;
+      }
+      const objUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          let w = img.naturalWidth || img.width || 1;
+          let h = img.naturalHeight || img.height || 1;
+          const scale = Math.min(1, maxSide / Math.max(w, h));
+          const tw = Math.max(1, Math.round(w * scale));
+          const th = Math.max(1, Math.round(h * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = tw;
+          canvas.height = th;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, tw, th);
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          URL.revokeObjectURL(objUrl);
+          resolve({ dataUrl, mimeType: 'image/jpeg' });
+        } catch (_) {
+          URL.revokeObjectURL(objUrl);
+          readFileAsDataUrl(file).then((du) => resolve({ dataUrl: du, mimeType: file.type || 'image/jpeg' }), reject);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objUrl);
+        readFileAsDataUrl(file).then((du) => resolve({ dataUrl: du, mimeType: file.type || 'image/jpeg' }), reject);
+      };
+      img.src = objUrl;
+    });
+  }
+
+  function getAttachmentBadgeLabel(att) {
+    if (att.kind === 'pdf') return 'PDF';
+    const m = String(att.name || '').match(/\.([a-z0-9]{1,5})$/i);
+    return m ? m[1].toUpperCase() : 'TXT';
+  }
+
+  function renderAttachTray() {
+    const list = state.pendingAttachments || [];
+    attachTrayEl.innerHTML = '';
+    attachTrayEl.classList.toggle('has-items', list.length > 0);
+
+    list.forEach((att) => {
+      const card = document.createElement('div');
+      card.className = `attach-item ${att.kind === 'image' ? 'is-image' : 'is-file'}`;
+
+      if (att.kind === 'image') {
+        const img = document.createElement('img');
+        img.className = 'attach-item-thumb';
+        img.src = att.dataUrl;
+        img.alt = att.name || 'Фото';
+        img.addEventListener('click', () => openImageLightbox(att.dataUrl, att.name || 'Фото'));
+        card.appendChild(img);
+      } else {
+        const badge = document.createElement('span');
+        badge.className = 'attach-file-badge';
+        badge.textContent = getAttachmentBadgeLabel(att);
+        card.appendChild(badge);
+
+        const meta = document.createElement('div');
+        meta.className = 'attach-file-meta';
+        meta.innerHTML = `<span class="attach-file-name">${escapeHtml(att.name || 'Файл')}</span><span class="attach-file-size">${escapeHtml(formatFileSizeShort(att.size))}</span>`;
+        card.appendChild(meta);
+      }
+
+      const rmBtn = document.createElement('button');
+      rmBtn.type = 'button';
+      rmBtn.className = 'attach-remove-btn';
+      rmBtn.setAttribute('aria-label', 'Удалить вложение');
+      rmBtn.textContent = '×';
+      rmBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (state.micState !== 'idle') return;
+        state.pendingAttachments = state.pendingAttachments.filter((item) => item.id !== att.id);
+        renderAttachTray();
+        syncSendButton();
+        syncFloatingPanelsPosition();
+      });
+      card.appendChild(rmBtn);
+      attachTrayEl.appendChild(card);
+    });
+
+    syncFloatingPanelsPosition();
+  }
+
+  async function processSelectedFiles(fileList) {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+    let added = 0;
+
+    for (let i = 0; i < files.length; i++) {
+      if (state.pendingAttachments.length >= MAX_PENDING_ATTACHMENTS) {
+        showToast(`Максимум ${MAX_PENDING_ATTACHMENTS} файлов за сообщение`);
+        break;
+      }
+
+      const file = files[i];
+      if (!file) continue;
+      const name = file.name || `file-${Date.now()}`;
+      const mime = (file.type || '').toLowerCase();
+
+      if (file.size > MAX_RAW_FILE_BYTES) {
+        showToast(`${name}: файл больше 20 МБ`);
+        continue;
+      }
+
+      const isImage = mime.startsWith('image/') || IMAGE_EXT_RE.test(name);
+      const isPdf = mime === 'application/pdf' || /\.pdf$/i.test(name);
+      const isKnownText =
+        mime.startsWith('text/') ||
+        mime.includes('json') ||
+        mime.includes('xml') ||
+        mime.includes('javascript') ||
+        mime.includes('ecmascript') ||
+        mime.includes('yaml') ||
+        mime.includes('csv') ||
+        TEXT_EXT_RE.test(name);
+
+      try {
+        if (isImage) {
+          const res = await compressImageFileToDataUrl(file);
+          const dataUrl = typeof res === 'string' ? res : res.dataUrl;
+          const outMime = typeof res === 'string' ? (mime || 'image/jpeg') : res.mimeType;
+          state.pendingAttachments.push({
+            id: 'att-' + Date.now() + '-' + Math.floor(Math.random() * 10000),
+            kind: 'image',
+            name,
+            mimeType: outMime,
+            size: file.size,
+            dataUrl
+          });
+          added += 1;
+        } else if (isPdf) {
+          if (file.size > MAX_PDF_FILE_BYTES) {
+            showToast(`${name}: PDF больше 10 МБ`);
+            continue;
+          }
+          const dataUrl = await readFileAsDataUrl(file);
+          state.pendingAttachments.push({
+            id: 'att-' + Date.now() + '-' + Math.floor(Math.random() * 10000),
+            kind: 'pdf',
+            name,
+            mimeType: 'application/pdf',
+            size: file.size,
+            dataUrl
+          });
+          added += 1;
+        } else if (isKnownText || file.size <= 1.5 * 1024 * 1024) {
+          const textRaw = await file.text();
+          // Reject obvious binary files containing null bytes
+          if (textRaw.includes('\u0000')) {
+            showToast(`${name}: бинарный формат не поддерживается`);
+            continue;
+          }
+          let clipped = textRaw;
+          if (clipped.length > MAX_TEXT_FILE_CHARS) {
+            clipped = clipped.slice(0, MAX_TEXT_FILE_CHARS) + '\n\n[...файл обрезан по лимиту 180k символов...]';
+          }
+          state.pendingAttachments.push({
+            id: 'att-' + Date.now() + '-' + Math.floor(Math.random() * 10000),
+            kind: 'text',
+            name,
+            mimeType: mime || 'text/plain',
+            size: file.size,
+            textContent: clipped
+          });
+          added += 1;
+        } else {
+          showToast(`${name}: используйте фото, PDF или текстовые файлы`);
+        }
+      } catch (_) {
+        showToast(`Не удалось прочитать ${name}`);
+      }
+    }
+
+    if (added > 0) {
+      renderAttachTray();
+      syncSendButton();
+      updateComposerLayout();
+    }
+  }
+
+  attachFileInput.addEventListener('change', () => {
+    const files = attachFileInput.files;
+    if (files && files.length > 0) {
+      processSelectedFiles(files);
+    }
+    attachFileInput.value = '';
+  });
+
+  /* =========================================================================
      GLOBAL iOS SELECTION & CALLOUT LOCK
      ========================================================================= */
   function clearWindowSelection() {
@@ -1677,6 +2233,11 @@
         else el.removeAttribute('aria-disabled');
         return;
       }
+      if (el === sendBtn && isRecording) {
+        el.disabled = false;
+        el.removeAttribute('aria-disabled');
+        return;
+      }
       el.disabled = isLocked;
       if (isLocked) el.setAttribute('aria-disabled', 'true');
       else el.removeAttribute('aria-disabled');
@@ -1702,7 +2263,7 @@
       micStatusBar.classList.add('active');
       recDot.classList.add('hidden');
       micStatusTimer.style.display = 'none';
-      micStatusHint.textContent = 'Транскрибация…';
+      micStatusHint.textContent = state.autoSendAfterTranscribe ? 'Транскрибация и отправка…' : 'Транскрибация…';
     } else {
       micIconSvg.classList.remove('mic-spinner-svg');
       micIconSvg.innerHTML = ICONS.micIdle;
@@ -2606,7 +3167,9 @@
   document.addEventListener('keydown', (e) => {
     if (state.micState !== 'idle') return;
     if (e.key === 'Escape') {
-      if (state.contextMenuChatId) {
+      if (imgLightboxEl && imgLightboxEl.classList.contains('open')) {
+        closeImageLightbox();
+      } else if (state.contextMenuChatId) {
         closeContextMenu();
       } else if (state.openPopover) {
         closePopover();
@@ -3239,8 +3802,10 @@
 
     // Remove fenced code blocks completely
     s = s.replace(/```[\s\S]*?```/g, ' ');
+    // Strip markdown images ![alt](url) completely so TTS does not read image URLs/alt
+    s = s.replace(/!\[[^\]]*\]\((?:https?:\/\/|data:image\/)[^)\s]+(?:\s+"[^"]*")?\)/gi, ' ');
     // Convert markdown links [label](url) -> label
-    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '$1');
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+(?:\s+"[^"]*")?)\)/gi, '$1');
     // Strip raw URLs
     s = s.replace(/https?:\/\/\S+/g, ' ');
     // Unwrap inline code
@@ -4044,38 +4609,150 @@
   /* =========================================================================
      MARKDOWN RENDERER & CODE BLOCK COPY DELEGATION
      ========================================================================= */
+  function isSafeRenderImageUrl(url) {
+    const u = String(url || '').trim();
+    return /^https?:\/\//i.test(u) || /^data:image\/(?:png|jpe?g|webp|gif|svg\+xml|avif);base64,[A-Za-z0-9+/=]+$/i.test(u);
+  }
+
+  function buildRenderedImageHtml(src, alt) {
+    const cleanAlt = String(alt || 'Изображение').trim();
+    return (
+      `<span class="md-img-wrap">` +
+        `<img class="md-img" src="${src}" alt="${cleanAlt}" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-lightbox-src="${src}" data-lightbox-title="${cleanAlt}" data-fallback-url="${src}">` +
+      `</span>`
+    );
+  }
+
+  function applyBasicEmphasis(str) {
+    let out = str;
+    out = out.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+    out = out.replace(/(^|[\s(>])__([^_]+?)__(?=[\s)<.,!?:;]|$)/g, '$1<strong>$2</strong>');
+    out = out.replace(/(^|[\s(>])\*([^*\n]+?)\*(?=[\s)<.,!?:;]|$)/g, '$1<em>$2</em>');
+    out = out.replace(/~~([^~]+?)~~/g, '<del>$1</del>');
+    return out;
+  }
+
+  function trimTrailingUrlPunctuation(rawUrl) {
+    let url = rawUrl;
+    let trailing = '';
+    while (url.length > 0) {
+      const last = url[url.length - 1];
+      if (/[.,;:!?»”'"]/.test(last)) {
+        trailing = last + trailing;
+        url = url.slice(0, -1);
+        continue;
+      }
+      if (last === ')') {
+        const opens = (url.match(/\(/g) || []).length;
+        const closes = (url.match(/\)/g) || []).length;
+        if (closes > opens) {
+          trailing = last + trailing;
+          url = url.slice(0, -1);
+          continue;
+        }
+      }
+      if (last === ']') {
+        const opens = (url.match(/\[/g) || []).length;
+        const closes = (url.match(/\]/g) || []).length;
+        if (closes > opens) {
+          trailing = last + trailing;
+          url = url.slice(0, -1);
+          continue;
+        }
+      }
+      break;
+    }
+    return { url, trailing };
+  }
+
   function formatInlineMarkdown(raw, hideIncompleteTagTail = false) {
     const codeTokens = [];
+    const mediaTokens = [];
+    const pushMedia = (html) => {
+      const idx = mediaTokens.length;
+      mediaTokens.push(html);
+      return `@@MDMEDIA_${idx}@@`;
+    };
+
     let s = escapeHtml(raw);
 
-    // Protect inline code spans first
+    // 1. Protect inline code spans first
     s = s.replace(/`([^`\n]+)`/g, (_, inner) => {
       const idx = codeTokens.length;
       codeTokens.push(`<code>${inner}</code>`);
       return `@@INLINECODE_${idx}@@`;
     });
 
-    // Hide whitelisted TTS tags on screen when enabled in the active persona
+    // 2. Hide whitelisted TTS tags on screen when enabled in the active persona
     if (isPersonaTtsTagsActive()) {
       s = stripWhitelistedTtsTags(s, hideIncompleteTagTail);
     }
 
-    // Safe http/https links: [label](url)
-    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
-      return `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:var(--menu-active-text);text-decoration:underline;">${label}</a>`;
+    // 3. Linked Markdown Images: [![alt](imgUrl)](linkUrl)
+    s = s.replace(
+      /\[!\[([^\]]*)\]\(((?:https?:\/\/|data:image\/)[^\s()]+(?:\([^\s()]*\)[^\s()]*)*)(?:\s+&quot;[^&]*&quot;)?\)\]\((https?:\/\/[^\s()]+(?:\([^\s()]*\)[^\s()]*)*)(?:\s+&quot;[^&]*&quot;)?\)/gi,
+      (full, alt, imgUrl, linkUrl) => {
+        if (!isSafeRenderImageUrl(imgUrl)) return full;
+        return pushMedia(
+          `<a class="md-link" href="${linkUrl}" target="_blank" rel="noopener noreferrer">${buildRenderedImageHtml(imgUrl, alt)}</a>`
+        );
+      }
+    );
+
+    // 4. Markdown Images: ![alt](url) or ![alt](data:image/...;base64,...)
+    s = s.replace(
+      /!\[([^\]]*)\]\(((?:https?:\/\/|data:image\/)[^\s()]+(?:\([^\s()]*\)[^\s()]*)*)(?:\s+&quot;[^&]*&quot;)?\)/gi,
+      (full, alt, imgUrl) => {
+        if (!isSafeRenderImageUrl(imgUrl)) return full;
+        return pushMedia(buildRenderedImageHtml(imgUrl, alt));
+      }
+    );
+
+    // 5. Markdown Links: [label](https://...) (supports balanced parens in URLs & optional title)
+    s = s.replace(
+      /\[([^\]]+)\]\(((?:https?:\/\/|mailto:)[^\s()]+(?:\([^\s()]*\)[^\s()]*)*)(?:\s+&quot;[^&]*&quot;)?\)/gi,
+      (_, label, url) => {
+        const styledLabel = applyBasicEmphasis(label);
+        return pushMedia(
+          `<a class="md-link" href="${url}" target="_blank" rel="noopener noreferrer">${styledLabel}</a>`
+        );
+      }
+    );
+
+    // 6. Autolinks: <https://...> (escaped to &lt;https://...&gt;)
+    s = s.replace(/&lt;(https?:\/\/[^\s<>]+)&gt;/gi, (_, url) => {
+      return pushMedia(
+        `<a class="md-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`
+      );
     });
 
-    // Bold **...** and __...__
-    s = s.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
-    s = s.replace(/(^|[\s(>])__([^_]+?)__(?=[\s)<.,!?:;]|$)/g, '$1<strong>$2</strong>');
+    // 7. Bare http/https URLs outside existing protected tokens
+    s = s.replace(/(^|[\s(>«“])(https?:\/\/[^\s<>]+)/gi, (full, prefix, rawUrl) => {
+      const { url, trailing } = trimTrailingUrlPunctuation(rawUrl);
+      if (!url) return full;
+      return (
+        prefix +
+        pushMedia(`<a class="md-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`) +
+        trailing
+      );
+    });
 
-    // Italic *...*
-    s = s.replace(/(^|[\s(>])\*([^*\n]+?)\*(?=[\s)<.,!?:;]|$)/g, '$1<em>$2</em>');
+    // 8. Bare www.example.com links
+    s = s.replace(/(^|[\s(>«“])(www\.[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>]*)?)/gi, (full, prefix, rawHost) => {
+      const { url, trailing } = trimTrailingUrlPunctuation(rawHost);
+      if (!url) return full;
+      return (
+        prefix +
+        pushMedia(`<a class="md-link" href="https://${url}" target="_blank" rel="noopener noreferrer">${url}</a>`) +
+        trailing
+      );
+    });
 
-    // Strikethrough ~~...~~
-    s = s.replace(/~~([^~]+?)~~/g, '<del>$1</del>');
+    // 9. Bold / Italic / Strikethrough (all URLs & image srcs are safely protected)
+    s = applyBasicEmphasis(s);
 
-    // Restore inline code
+    // 10. Restore protected links/images & inline code
+    s = s.replace(/@@MDMEDIA_(\d+)@@/g, (_, idx) => mediaTokens[Number(idx)] || '');
     s = s.replace(/@@INLINECODE_(\d+)@@/g, (_, idx) => codeTokens[Number(idx)] || '');
     return s;
   }
@@ -4233,8 +4910,18 @@
     return html;
   }
 
-  // Event delegation for Copy buttons inside rendered markdown code blocks
+  // Event delegation for Copy buttons & fullscreen image Lightbox inside chatFeed
   chatFeed.addEventListener('click', (e) => {
+    const lbTarget = e.target && e.target.closest ? e.target.closest('[data-lightbox-src]') : null;
+    if (lbTarget && state.micState === 'idle') {
+      // If wrapped inside an <a> link, let normal link navigation happen unless direct image
+      if (!lbTarget.closest('a.md-link')) {
+        e.stopPropagation();
+        openImageLightbox(lbTarget.dataset.lightboxSrc, lbTarget.dataset.lightboxTitle || lbTarget.getAttribute('alt') || '');
+        return;
+      }
+    }
+
     const btn = e.target && e.target.closest ? e.target.closest('[data-code-copy]') : null;
     if (!btn || state.micState !== 'idle') return;
     e.stopPropagation();
@@ -4247,6 +4934,24 @@
       if (btn.isConnected) btn.textContent = 'Копировать';
     }, 1100);
   });
+
+  // Graceful fallback if a remote AI markdown image fails to load (hotlink block / 404)
+  chatFeed.addEventListener('error', (e) => {
+    const img = e.target;
+    if (!img || img.tagName !== 'IMG' || !img.matches('img.md-img, img.ai-img-el')) return;
+    const url = img.dataset.fallbackUrl || img.getAttribute('src') || '';
+    if (!/^https?:\/\//i.test(url)) return;
+    const alt = img.getAttribute('alt') || 'Открыть изображение';
+    const link = document.createElement('a');
+    link.className = 'md-img-fallback';
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = `${alt} ↗`;
+    const parentWrap = img.closest('.md-img-wrap');
+    if (parentWrap) parentWrap.replaceWith(link);
+    else img.replaceWith(link);
+  }, true);
 
   function cancelActiveStreamHandle() {
     if (state.streamRafId) {
@@ -4329,6 +5034,32 @@
         aiContent.innerHTML = msg.html;
       } else {
         aiContent.innerHTML = renderMarkdownToHtml(msg.plainText || '', Boolean(msg.streaming));
+      }
+
+      if (Array.isArray(msg.images) && msg.images.length > 0) {
+        let imgGrid = block.querySelector('.ai-images-grid');
+        if (!imgGrid) {
+          imgGrid = document.createElement('div');
+          imgGrid.className = 'ai-images-grid';
+          block.insertBefore(imgGrid, footer || null);
+        }
+        if (imgGrid.childElementCount !== msg.images.length) {
+          imgGrid.innerHTML = '';
+          msg.images.forEach((im) => {
+            if (!im || !im.url || !isSafeRenderImageUrl(im.url)) return;
+            const imgEl = document.createElement('img');
+            imgEl.className = 'ai-img-el';
+            imgEl.src = im.url;
+            imgEl.alt = im.alt || 'Изображение';
+            imgEl.loading = 'lazy';
+            imgEl.decoding = 'async';
+            imgEl.referrerPolicy = 'no-referrer';
+            imgEl.dataset.lightboxSrc = im.url;
+            imgEl.dataset.lightboxTitle = im.alt || 'Изображение';
+            imgEl.dataset.fallbackUrl = im.url;
+            imgGrid.appendChild(imgEl);
+          });
+        }
       }
     }
 
@@ -4465,10 +5196,39 @@
             try { card.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) {}
           });
         } else {
-          const textEl = document.createElement('div');
-          textEl.className = `msg-body${msg.collapsed ? ' clamped' : ''}`;
-          textEl.textContent = msg.text;
-          card.appendChild(textEl);
+          const hasAtts = Array.isArray(msg.attachments) && msg.attachments.length > 0;
+          const hasText = Boolean(msg.text && msg.text.trim());
+
+          if (hasAtts) {
+            const attRow = document.createElement('div');
+            attRow.className = `msg-attachments-row${!hasText ? ' only-attachments' : ''}`;
+            msg.attachments.forEach((att) => {
+              if (!att) return;
+              if (att.kind === 'image' && att.dataUrl) {
+                const img = document.createElement('img');
+                img.className = 'msg-att-img';
+                img.src = att.dataUrl;
+                img.alt = att.name || 'Фото';
+                img.loading = 'lazy';
+                img.dataset.lightboxSrc = att.dataUrl;
+                img.dataset.lightboxTitle = att.name || 'Фото';
+                attRow.appendChild(img);
+              } else {
+                const chip = document.createElement('div');
+                chip.className = 'msg-att-chip';
+                chip.innerHTML = `<span class="attach-file-badge">${escapeHtml(getAttachmentBadgeLabel(att))}</span><span class="msg-att-chip-name">${escapeHtml(att.name || 'Файл')}</span>`;
+                attRow.appendChild(chip);
+              }
+            });
+            card.appendChild(attRow);
+          }
+
+          if (hasText) {
+            const textEl = document.createElement('div');
+            textEl.className = `msg-body${msg.collapsed ? ' clamped' : ''}`;
+            textEl.textContent = msg.text;
+            card.appendChild(textEl);
+          }
 
           if (msg.collapsed) {
             card.addEventListener('click', () => {
@@ -4499,8 +5259,8 @@
             aiContent.innerHTML = msg.html;
           } else if (msg.streaming) {
             aiContent.innerHTML = renderMarkdownToHtml(msg.plainText || '', true);
-          } else if (msg.plainText && hasWhitelistedTtsTag(msg.plainText)) {
-            // Re-render dynamically so toggling the "TTS теги" checkbox shows/hides tags live
+          } else if (msg.plainText && (String(msg.id || '').startsWith('a-') || hasWhitelistedTtsTag(msg.plainText) || !msg.html)) {
+            // Re-render real AI replies dynamically so images, links & TTS-tag toggle always render up-to-date
             aiContent.innerHTML = renderMarkdownToHtml(msg.plainText, false);
           } else if (msg.html) {
             aiContent.innerHTML = msg.html;
@@ -4516,7 +5276,53 @@
               renderFeed();
             });
           }
-          block.appendChild(aiContent);
+          if (msg.plainText || msg.html || msg.streaming) {
+            block.appendChild(aiContent);
+          }
+
+          if (Array.isArray(msg.images) && msg.images.length > 0 && !msg.collapsed) {
+            const imgGrid = document.createElement('div');
+            imgGrid.className = 'ai-images-grid';
+            msg.images.forEach((im) => {
+              if (!im || !im.url || !isSafeRenderImageUrl(im.url)) return;
+              const imgEl = document.createElement('img');
+              imgEl.className = 'ai-img-el';
+              imgEl.src = im.url;
+              imgEl.alt = im.alt || 'Изображение';
+              imgEl.loading = 'lazy';
+              imgEl.decoding = 'async';
+              imgEl.referrerPolicy = 'no-referrer';
+              imgEl.dataset.lightboxSrc = im.url;
+              imgEl.dataset.lightboxTitle = im.alt || 'Изображение';
+              imgEl.dataset.fallbackUrl = im.url;
+              imgGrid.appendChild(imgEl);
+            });
+            if (imgGrid.childElementCount > 0) {
+              block.appendChild(imgGrid);
+            }
+          }
+
+          if (Array.isArray(msg.citations) && msg.citations.length > 0 && !msg.collapsed) {
+            const citRow = document.createElement('div');
+            citRow.className = 'ai-citations-row';
+            msg.citations.forEach((c) => {
+              if (!c || !c.url || !/^https?:\/\//i.test(c.url)) return;
+              const a = document.createElement('a');
+              a.className = 'ai-citation-chip';
+              a.href = c.url;
+              a.target = '_blank';
+              a.rel = 'noopener noreferrer';
+              let label = c.title || '';
+              if (!label) {
+                try { label = new URL(c.url).hostname.replace(/^www\./, ''); } catch (_) { label = c.url; }
+              }
+              a.innerHTML = `<span>${escapeHtml(label)}</span><span style="opacity:0.65;flex-shrink:0;">↗</span>`;
+              citRow.appendChild(a);
+            });
+            if (citRow.childElementCount > 0) {
+              block.appendChild(citRow);
+            }
+          }
         }
       }
 
@@ -4942,7 +5748,10 @@
 
   document.getElementById('attachBtn').addEventListener('click', () => {
     if (state.micState !== 'idle') return;
-    showToast('Вложения: фото / файл (мок)');
+    closePopover();
+    setBottomPanel(null);
+    attachFileInput.value = '';
+    attachFileInput.click();
   });
 
   /* =========================================================================
@@ -4957,8 +5766,20 @@
       return;
     }
     sendBtn.classList.remove('streaming');
-    const hasText = state.micState === 'idle' && chatInput.value.trim().length > 0;
-    sendBtn.classList.toggle('ready', hasText);
+
+    if (state.micState === 'recording') {
+      sendBtn.disabled = false;
+      sendBtn.removeAttribute('aria-disabled');
+      sendBtn.classList.add('ready');
+      sendBtn.setAttribute('aria-label', 'Остановить запись и отправить');
+      sendIconSvg.innerHTML = '<line x1="12" y1="19" x2="12" y2="5"></line><polyline points="6 11 12 5 18 11"></polyline>';
+      return;
+    }
+
+    const hasPayload =
+      state.micState === 'idle' &&
+      (chatInput.value.trim().length > 0 || (state.pendingAttachments && state.pendingAttachments.length > 0));
+    sendBtn.classList.toggle('ready', hasPayload);
     sendBtn.setAttribute('aria-label', 'Отправить');
     sendIconSvg.innerHTML = '<line x1="12" y1="19" x2="12" y2="5"></line><polyline points="6 11 12 5 18 11"></polyline>';
   }
@@ -4971,8 +5792,22 @@
     });
   });
 
-  chatInput.addEventListener('paste', () => {
+  chatInput.addEventListener('paste', (e) => {
     if (state.micState !== 'idle') return;
+    const cd = e.clipboardData;
+    if (cd && cd.items && cd.items.length > 0) {
+      const pastedFiles = [];
+      for (let i = 0; i < cd.items.length; i++) {
+        const it = cd.items[i];
+        if (it && it.kind === 'file') {
+          const f = it.getAsFile();
+          if (f) pastedFiles.push(f);
+        }
+      }
+      if (pastedFiles.length > 0) {
+        processSelectedFiles(pastedFiles);
+      }
+    }
     requestAnimationFrame(() => {
       updateComposerLayout();
       syncSendButton();
@@ -5255,16 +6090,21 @@
     }
   }
 
-  async function stopMicAndTranscribe() {
+  async function stopMicAndTranscribe(autoSend = false) {
     if (state.micState !== 'recording') return;
 
     clearInterval(state.recInterval);
     state.recInterval = null;
 
+    const shouldAutoSend = Boolean(autoSend);
+    state.autoSendAfterTranscribe = shouldAutoSend;
+
     const recorder = state.mediaRecorder;
     const elapsedSec = Math.max(1, Math.round((Date.now() - (state.recStartedAt || Date.now())) / 1000));
 
     applyAppMicLock('transcribing');
+
+    let readyForAutoSend = false;
 
     try {
       if (recorder && recorder.state !== 'inactive') {
@@ -5366,18 +6206,26 @@
         return;
       }
 
-      // Insert into input field WITHOUT auto-sending
+      // Insert into input field; auto-send immediately if user tapped Send while recording
       const existing = chatInput.value.trim();
       chatInput.value = existing ? `${existing} ${transcript}` : transcript;
+      if (shouldAutoSend) {
+        readyForAutoSend = true;
+      }
     } catch (err) {
       releaseMicStreamAndRestoreAudio(true);
       showToast(err && err.message ? err.message : 'Ошибка транскрибации');
     } finally {
+      state.autoSendAfterTranscribe = false;
       releaseMicStreamAndRestoreAudio(true);
       applyAppMicLock('idle');
       updateComposerLayout();
       syncSendButton();
       updateScrollBottomBtn();
+    }
+
+    if (readyForAutoSend && state.micState === 'idle') {
+      handleSendOrStop();
     }
   }
 
@@ -5518,12 +6366,58 @@
       out.push({ role: 'system', content: sysInstructions });
     }
 
-    // Strict allowlist: ONLY pure text from user/assistant messages; zero audio/base64/binary fields
+    // Strict allowlist: pure text + explicit user-uploaded attachments (image/pdf/text); zero STT/TTS audio blobs
     (chat.messages || []).forEach((m) => {
       if (!m || m.id === excludeMsgId || m.isError) return;
       if (m.role === 'user') {
         const txt = extractStrictPlainText(m.text);
-        if (txt) out.push({ role: 'user', content: txt });
+        const atts = Array.isArray(m.attachments) ? m.attachments : [];
+        if (atts.length === 0) {
+          if (txt) out.push({ role: 'user', content: txt });
+          return;
+        }
+
+        const parts = [];
+        atts.forEach((att) => {
+          if (!att) return;
+          if (att.kind === 'text' && typeof att.textContent === 'string' && att.textContent.trim()) {
+            const safeName = String(att.name || 'file.txt').replace(/[\r\n]/g, ' ');
+            parts.push({
+              type: 'text',
+              text: `[Прикреплённый файл: ${safeName}]\n${att.textContent}`
+            });
+          }
+        });
+        if (txt) {
+          parts.push({ type: 'text', text: txt });
+        }
+        atts.forEach((att) => {
+          if (!att) return;
+          if (att.kind === 'image' && typeof att.dataUrl === 'string' && /^data:image\//i.test(att.dataUrl)) {
+            parts.push({
+              type: 'image_url',
+              image_url: { url: att.dataUrl }
+            });
+          } else if (att.kind === 'pdf' && typeof att.dataUrl === 'string' && /^data:application\/pdf/i.test(att.dataUrl)) {
+            parts.push({
+              type: 'file',
+              file: {
+                filename: String(att.name || 'document.pdf'),
+                file_data: att.dataUrl
+              }
+            });
+          }
+        });
+
+        if (parts.length > 0) {
+          // If only text parts exist, collapse to a single string when possible
+          const allText = parts.every((p) => p.type === 'text');
+          if (allText) {
+            out.push({ role: 'user', content: parts.map((p) => p.text).join('\n\n') });
+          } else {
+            out.push({ role: 'user', content: parts });
+          }
+        }
       } else if (m.role === 'assistant') {
         const txt = extractStrictPlainText(m.plainText);
         if (txt) out.push({ role: 'assistant', content: txt });
@@ -5544,11 +6438,28 @@
       // Place rolling cache breakpoint on the message immediately preceding the latest user turn
       const lastIdx = out.length - 1;
       const historyIdx = lastIdx >= 1 && out[lastIdx].role === 'user' ? lastIdx - 1 : -1;
-      if (historyIdx >= 0 && out[historyIdx].role !== 'system' && typeof out[historyIdx].content === 'string') {
-        out[historyIdx] = {
-          role: out[historyIdx].role,
-          content: toCachedMultipartContent(out[historyIdx].content)
-        };
+      if (historyIdx >= 0 && out[historyIdx].role !== 'system') {
+        if (typeof out[historyIdx].content === 'string') {
+          out[historyIdx] = {
+            role: out[historyIdx].role,
+            content: toCachedMultipartContent(out[historyIdx].content)
+          };
+        } else if (Array.isArray(out[historyIdx].content) && out[historyIdx].content.length > 0) {
+          const clonedParts = out[historyIdx].content.map((p) => Object.assign({}, p));
+          let targetPartIdx = -1;
+          for (let k = clonedParts.length - 1; k >= 0; k--) {
+            if (clonedParts[k].type === 'text') {
+              targetPartIdx = k;
+              break;
+            }
+          }
+          if (targetPartIdx === -1) targetPartIdx = clonedParts.length - 1;
+          clonedParts[targetPartIdx].cache_control = { type: 'ephemeral' };
+          out[historyIdx] = {
+            role: out[historyIdx].role,
+            content: clonedParts
+          };
+        }
       }
     }
 
@@ -5837,7 +6748,9 @@
     const idx = chat.messages.findIndex((m) => m.id === msgId && m.role === 'assistant');
     if (idx === -1) return;
 
-    const hasUserBefore = chat.messages.slice(0, idx).some((m) => m && m.role === 'user' && (m.text || '').trim());
+    const hasUserBefore = chat.messages.slice(0, idx).some(
+      (m) => m && m.role === 'user' && ((m.text || '').trim() || (Array.isArray(m.attachments) && m.attachments.length > 0))
+    );
     if (!hasUserBefore) {
       showToast('Нет исходного сообщения пользователя');
       return;
@@ -5863,6 +6776,11 @@
   }
 
   async function handleSendOrStop() {
+    // Tapping Send during audio recording stops recording, runs STT, and immediately sends the result
+    if (state.micState === 'recording') {
+      stopMicAndTranscribe(true);
+      return;
+    }
     if (state.micState !== 'idle') return;
     if (state.generatingMsgId) {
       abortGeneration(true, true);
@@ -5870,7 +6788,8 @@
     }
 
     const text = chatInput.value.trim();
-    if (!text) return;
+    const attachments = state.pendingAttachments.slice();
+    if (!text && attachments.length === 0) return;
 
     // Unlock iOS Safari single <audio> synchronously inside Send tap when Auto TTS is enabled
     if (state.autoTts) {
@@ -5893,7 +6812,13 @@
 
     const now = new Date();
     if (chat.messages.length === 0) {
-      chat.title = text.slice(0, 32) + (text.length > 32 ? '…' : '');
+      if (text) {
+        chat.title = text.slice(0, 32) + (text.length > 32 ? '…' : '');
+      } else if (attachments.length > 0) {
+        const firstAtt = attachments[0];
+        const fallbackTitle = firstAtt.kind === 'image' ? `Фото: ${firstAtt.name}` : `Файл: ${firstAtt.name}`;
+        chat.title = fallbackTitle.slice(0, 32) + (fallbackTitle.length > 32 ? '…' : '');
+      }
     }
     chat.date = `Сегодня · ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
@@ -5902,11 +6827,14 @@
       role: 'user',
       timestamp: formatCompactTimestamp(now),
       collapsed: false,
-      text
+      text,
+      attachments: attachments.length > 0 ? attachments : undefined
     });
     persistChat(chat);
 
     chatInput.value = '';
+    state.pendingAttachments = [];
+    renderAttachTray();
     updateComposerLayout();
 
     await runAssistantCompletion(chat);
@@ -5932,7 +6860,87 @@
       streaming: false,
       isError: false,
       plainText: '',
-      html: ''
+      html: '',
+      images: [],
+      citations: []
+    };
+
+    const appendUniqueAiImage = (url, alt = '') => {
+      const cleanUrl = String(url || '').trim();
+      if (!cleanUrl || !isSafeRenderImageUrl(cleanUrl)) return false;
+      if (aiMsg.images.some((im) => im.url === cleanUrl)) return false;
+      aiMsg.images.push({ url: cleanUrl, alt: String(alt || 'Изображение') });
+      return true;
+    };
+
+    const appendUniqueCitation = (url, title = '') => {
+      const cleanUrl = String(url || '').trim();
+      if (!/^https?:\/\//i.test(cleanUrl)) return;
+      if (aiMsg.citations.some((c) => c.url === cleanUrl)) return;
+      aiMsg.citations.push({ url: cleanUrl, title: String(title || '').trim() });
+    };
+
+    const collectMultimodalFromObj = (obj) => {
+      let textOut = '';
+      let addedImg = false;
+      if (!obj || typeof obj !== 'object') return { textOut, addedImg };
+
+      if (typeof obj.content === 'string') {
+        textOut += obj.content;
+      } else if (Array.isArray(obj.content)) {
+        obj.content.forEach((part) => {
+          if (!part) return;
+          if (typeof part === 'string') {
+            textOut += part;
+          } else if (part.type === 'text' && typeof part.text === 'string') {
+            textOut += part.text;
+          } else if (part.type === 'image_url' && part.image_url && part.image_url.url) {
+            if (appendUniqueAiImage(part.image_url.url, part.alt || '')) addedImg = true;
+          } else if (part.type === 'image' && (part.url || part.data)) {
+            const u = part.url || `data:${part.mime_type || 'image/png'};base64,${part.data}`;
+            if (appendUniqueAiImage(u, part.alt || '')) addedImg = true;
+          }
+        });
+      }
+
+      if (Array.isArray(obj.images)) {
+        obj.images.forEach((item) => {
+          if (!item) return;
+          if (typeof item === 'string') {
+            if (appendUniqueAiImage(item, '')) addedImg = true;
+          } else if (item.image_url && item.image_url.url) {
+            if (appendUniqueAiImage(item.image_url.url, item.alt || '')) addedImg = true;
+          } else if (item.url) {
+            if (appendUniqueAiImage(item.url, item.alt || '')) addedImg = true;
+          } else if (item.b64_json) {
+            const mime = item.mime_type || 'image/png';
+            if (appendUniqueAiImage(`data:${mime};base64,${item.b64_json}`, item.alt || '')) addedImg = true;
+          }
+        });
+      }
+
+      if (Array.isArray(obj.annotations)) {
+        obj.annotations.forEach((ann) => {
+          if (!ann) return;
+          if (ann.type === 'url_citation' && ann.url_citation && ann.url_citation.url) {
+            appendUniqueCitation(ann.url_citation.url, ann.url_citation.title || '');
+          } else if (ann.url) {
+            appendUniqueCitation(ann.url, ann.title || '');
+          }
+        });
+      }
+
+      return { textOut, addedImg };
+    };
+
+    const collectTopLevelCitations = (payloadObj) => {
+      if (!payloadObj || typeof payloadObj !== 'object') return;
+      if (Array.isArray(payloadObj.citations)) {
+        payloadObj.citations.forEach((cit) => {
+          if (typeof cit === 'string') appendUniqueCitation(cit, '');
+          else if (cit && cit.url) appendUniqueCitation(cit.url, cit.title || '');
+        });
+      }
     };
 
     chat.messages.push(aiMsg);
@@ -6052,8 +7060,10 @@
           setAssistantError(chat, aiMsg, formatApiErrorForChat(data.error.code || 0, msg, usingFlex, capturedModelLabel));
           return;
         }
+        collectTopLevelCitations(data);
         const choice = data && data.choices && data.choices[0];
-        const content = choice && choice.message && choice.message.content ? String(choice.message.content) : '';
+        const extracted = collectMultimodalFromObj(choice && choice.message);
+        const content = extracted.textOut;
         if (data && data.usage) finalUsage = mergeStreamUsage(finalUsage, data.usage);
         aiMsg.liveThinking = null;
         aiMsg.streaming = false;
@@ -6088,25 +7098,26 @@
           if (parsed && parsed.usage) {
             finalUsage = mergeStreamUsage(finalUsage, parsed.usage);
           }
+          collectTopLevelCitations(parsed);
 
           const choice = parsed && parsed.choices && parsed.choices[0];
           if (!choice) return;
-          const delta = choice.delta || {};
+          const delta = choice.delta || choice.message || {};
 
           const reasoningChunk = extractReasoningDelta(delta);
-          if (reasoningChunk && !aiMsg.plainText) {
+          if (reasoningChunk && !aiMsg.plainText && aiMsg.images.length === 0) {
             reasoningBuffer += reasoningChunk;
             aiMsg.liveThinking = formatLiveThinkingSnippet(reasoningBuffer);
             scheduleStreamDOMUpdate(aiMsg);
           }
 
-          const contentChunk = typeof delta.content === 'string' ? delta.content : '';
-          if (contentChunk) {
+          const { textOut: contentChunk, addedImg } = collectMultimodalFromObj(delta);
+          if (contentChunk || addedImg) {
             if (aiMsg.liveThinking !== null) {
               aiMsg.liveThinking = null;
             }
             aiMsg.streaming = true;
-            aiMsg.plainText += contentChunk;
+            if (contentChunk) aiMsg.plainText += contentChunk;
             scheduleStreamDOMUpdate(aiMsg);
           }
         };
@@ -6152,7 +7163,7 @@
         } else {
           aiMsg.liveThinking = null;
           aiMsg.streaming = false;
-          if (!aiMsg.plainText.trim()) {
+          if (!aiMsg.plainText.trim() && aiMsg.images.length === 0) {
             setAssistantError(chat, aiMsg, 'Модель вернула пустой ответ.');
           } else {
             aiMsg.html = renderMarkdownToHtml(aiMsg.plainText, false);
