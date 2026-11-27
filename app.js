@@ -2339,6 +2339,20 @@
     const refBottom = shellRect.height > 0 ? shellRect.bottom : window.innerHeight;
     const bottomOffset = Math.max(76, Math.round(refBottom - rect.top + 10));
     floatingPanelsLayer.style.setProperty('--panels-bottom', `${bottomOffset}px`);
+
+    const rowAnchor = autoTtsBtn || audioDockBtn || tier2Row;
+    const rowTop = rowAnchor ? rowAnchor.getBoundingClientRect().top : rect.top;
+    const feedBottom = Math.max(0, Math.round(refBottom - rowTop));
+    if (feedBottom > 0) {
+      const nextFeedBottom = `${feedBottom}px`;
+      if (chatFeed.style.getPropertyValue('--feed-bottom') !== nextFeedBottom) {
+        const wasNearBottom = (chatFeed.scrollHeight - chatFeed.scrollTop - chatFeed.clientHeight) < 40;
+        chatFeed.style.setProperty('--feed-bottom', nextFeedBottom);
+        if (wasNearBottom) {
+          chatFeed.scrollTop = chatFeed.scrollHeight;
+        }
+      }
+    }
   }
 
   /* =========================================================================

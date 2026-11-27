@@ -767,12 +767,13 @@
     .chat-feed {
       flex: 1;
       min-height: 0;
+      margin-bottom: var(--feed-bottom, 162px);
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       overscroll-behavior-y: contain;
       touch-action: pan-y;
       background-color: var(--bg);
-      padding: 8px 16px 207px;
+      padding: 8px 16px 34px;
       display: flex;
       flex-direction: column;
       gap: 20px;
@@ -782,7 +783,7 @@
     .chat-empty {
       margin: auto 0;
       text-align: center;
-      padding: 40px 20px 120px;
+      padding: 40px 20px 44px;
       color: var(--text-dim);
       display: flex;
       flex-direction: column;
@@ -1058,31 +1059,47 @@
       flex-direction: column;
     }
 
-    /* Composer-width (left/right: 10px, scrollbar unobstructed) non-linear black fade + solid opaque #000000 base:
-       - Top edge sits 44px above Persona top (y = 4px -> top: -40px), flat horizontal line
-       - Smooth eased ramp reaches ~92% at Persona top (44px) and 100% solid #000000 at 52px (8px below Persona top)
-       - Solid opaque #000000 continues through composer middle down to screen bottom */
+    /* Full-width cool slate-graphite gradient plaque starting flush at top of 44px button row (top: 21px = bottom of .chat-feed):
+       - Lighter/whitish slate-gray at bottom, softer/darker toward top edge -> never overlaps native iOS scrollbar */
     .bottom-dock::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 21px;
+      bottom: 0;
+      z-index: -1;
+      pointer-events: none;
+      background:
+        linear-gradient(
+          to bottom,
+          rgba(62, 65, 76, 0) 0px,
+          rgba(62, 65, 76, 0.11) 24px,
+          rgba(62, 65, 76, 0.22) 60px,
+          rgba(62, 65, 76, 0.31) 108px,
+          rgba(62, 65, 76, 0.38) 100%
+        ),
+        #000000;
+    }
+
+    /* Soft black text fade strictly inside text column (left/right: 10px) above top: 21px
+       so scrolled text melts smoothly behind the protruding Persona circle without touching the scrollbar */
+    .bottom-dock::after {
       content: "";
       position: absolute;
       left: 10px;
       right: 10px;
-      top: -40px;
-      bottom: 0;
+      top: -16px;
+      height: 37px;
       z-index: -1;
       pointer-events: none;
       background: linear-gradient(
         to bottom,
         rgba(0, 0, 0, 0) 0px,
-        rgba(0, 0, 0, 0.023) 8px,
-        rgba(0, 0, 0, 0.124) 16px,
-        rgba(0, 0, 0, 0.317) 24px,
-        rgba(0, 0, 0, 0.571) 32px,
-        rgba(0, 0, 0, 0.762) 38px,
-        rgba(0, 0, 0, 0.915) 44px,
-        rgba(0, 0, 0, 0.978) 48px,
-        #000000 52px,
-        #000000 100%
+        rgba(0, 0, 0, 0.18) 11px,
+        rgba(0, 0, 0, 0.56) 22px,
+        rgba(0, 0, 0, 0.90) 31px,
+        #000000 37px
       );
     }
 
