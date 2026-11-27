@@ -1085,7 +1085,7 @@
     }
 
     /* Clean vertical bottom-to-top slate gradient plaque starting flush at top of 44px button row (top: 25px = bottom of .chat-feed):
-       - Soft whitish-slate at screen bottom (#30333b), smoothly stepping down to dark gray (#15161a) at the top edge */
+       - Soft whitish-slate at screen bottom (#30333b), smoothly melting into pure #000000 at top edge */
     .bottom-dock::before {
       content: "";
       position: absolute;
@@ -1098,11 +1098,12 @@
       background: linear-gradient(
         to top,
         #30333b 0%,
-        #282a31 16%,
-        #212329 34%,
-        #1b1c21 58%,
-        #17181d 80%,
-        #15161a 100%
+        #262830 18%,
+        #1c1e24 38%,
+        #121317 60%,
+        #090a0c 78%,
+        #030304 91%,
+        #000000 100%
       );
     }
 
@@ -1153,7 +1154,7 @@
       height: 38px;
       border-radius: 50%;
       background-color: var(--bg-scroll-btn);
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.68);
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.55);
       color: #e6e8ec;
       display: inline-flex;
       align-items: center;
@@ -1238,7 +1239,7 @@
       gap: 4px;
       white-space: nowrap;
       flex-shrink: 0;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.52);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.42);
       -webkit-tap-highlight-color: transparent;
       transition: background-color 0.12s ease, color 0.12s ease, transform 0.1s ease;
     }
@@ -1309,7 +1310,7 @@
       min-height: var(--menu-item-h);
       border-radius: 9999px;
       background-color: var(--surface-composer);
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.52);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.42);
       overflow: hidden;
       display: flex;
       align-items: center;
@@ -1905,7 +1906,7 @@
       min-height: 72px;
       border-radius: 36px;
       background-color: var(--surface-composer);
-      box-shadow: 0 12px 34px rgba(0, 0, 0, 0.65);
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.46);
       padding: 11px;
       display: grid;
       grid-template-columns: 50px minmax(0, 1fr) 50px 50px;
