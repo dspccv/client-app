@@ -1084,8 +1084,8 @@
       flex-direction: column;
     }
 
-    /* Clean vertical bottom-to-top slate gradient plaque starting flush at top of 44px button row (top: 25px = bottom of .chat-feed):
-       - Muted slate at screen bottom (#222429, -30% vs v23), smoothly melting into pure #000000 at top edge */
+    /* Clean vertical bottom-to-top slate gradient plaque (backing starts at top: 25px = bottom of .chat-feed):
+       - Dimmed -15% vs v24 (#1d1f23 at bottom), fully fading to pure #000000 at the vertical center of the 44px Tier-2 button row (22px below top: 25px) */
     .bottom-dock::before {
       content: "";
       position: absolute;
@@ -1095,16 +1095,18 @@
       bottom: 0;
       z-index: -1;
       pointer-events: none;
-      background: linear-gradient(
-        to top,
-        #222429 0%,
-        #1b1c22 18%,
-        #141519 38%,
-        #0d0d10 60%,
-        #060708 78%,
-        #020203 91%,
-        #000000 100%
-      );
+      background:
+        linear-gradient(
+          to top,
+          #1d1f23 0%,
+          #17181d 18%,
+          #111215 38%,
+          #0b0b0e 60%,
+          #050607 78%,
+          #020203 91%,
+          #000000 100%
+        ) left bottom / 100% calc(100% - 22px) no-repeat,
+        #000000;
     }
 
     /* Silky 13-stop eased black text fade shifted up by 7px (~1/6 of 44px Auto TTS):
