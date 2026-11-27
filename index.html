@@ -773,7 +773,7 @@
       overscroll-behavior-y: contain;
       touch-action: pan-y;
       background-color: var(--bg);
-      padding: 8px 16px 34px;
+      padding: 8px 16px 43px;
       display: flex;
       flex-direction: column;
       gap: 20px;
@@ -1054,61 +1054,61 @@
       background: transparent;
       pointer-events: none;
       padding-top: 4px;
-      padding-bottom: max(42px, calc(env(safe-area-inset-bottom, 0px) + 16px));
+      padding-bottom: max(31px, calc(env(safe-area-inset-bottom, 0px) + 5px));
       display: flex;
       flex-direction: column;
     }
 
-    /* Full-width cool slate-graphite gradient plaque starting flush at top of 44px button row (top: 21px = bottom of .chat-feed):
+    /* Full-width cool whitish-slate gradient plaque (+15% lighter) starting flush at top of 44px row (top: 30px = bottom of .chat-feed):
        - Spread higher behind composer & lower half of upper buttons, melting into #000000 around the 50% midline (22px) -> never overlaps native iOS scrollbar */
     .bottom-dock::before {
       content: "";
       position: absolute;
       left: 0;
       right: 0;
-      top: 21px;
+      top: 30px;
       bottom: 0;
       z-index: -1;
       pointer-events: none;
       background:
         linear-gradient(
           to bottom,
-          rgba(62, 65, 76, 0) 0px,
-          rgba(62, 65, 76, 0.035) 10px,
-          rgba(62, 65, 76, 0.11) 18px,
-          rgba(62, 65, 76, 0.18) 24px,
-          rgba(62, 65, 76, 0.255) 34px,
-          rgba(62, 65, 76, 0.31) 50px,
-          rgba(62, 65, 76, 0.35) 88px,
-          rgba(62, 65, 76, 0.40) 100%
+          rgba(70, 73, 82, 0) 0px,
+          rgba(70, 73, 82, 0.04) 10px,
+          rgba(70, 73, 82, 0.127) 18px,
+          rgba(70, 73, 82, 0.207) 24px,
+          rgba(70, 73, 82, 0.293) 34px,
+          rgba(70, 73, 82, 0.357) 50px,
+          rgba(70, 73, 82, 0.403) 88px,
+          rgba(70, 73, 82, 0.46) 100%
         ),
         #000000;
     }
 
-    /* Silky 11-stop eased black text fade strictly inside current bounds (left/right: 10px, top: -16px, height: 37px)
-       so scrolled text melts smoothly behind the protruding Persona circle without touching the scrollbar */
+    /* Silky 11-stop eased black text fade strictly inside text column (left/right: 10px, top: -16px, height: 46px -> 30px)
+       so scrolled text melts smoothly behind the protruding 70px Persona & Auto TTS circles without touching the scrollbar */
     .bottom-dock::after {
       content: "";
       position: absolute;
       left: 10px;
       right: 10px;
       top: -16px;
-      height: 37px;
+      height: 46px;
       z-index: -1;
       pointer-events: none;
       background: linear-gradient(
         to bottom,
         rgba(0, 0, 0, 0) 0px,
-        rgba(0, 0, 0, 0.022) 4px,
-        rgba(0, 0, 0, 0.097) 8px,
-        rgba(0, 0, 0, 0.223) 12px,
-        rgba(0, 0, 0, 0.388) 16px,
-        rgba(0, 0, 0, 0.568) 20px,
-        rgba(0, 0, 0, 0.738) 24px,
-        rgba(0, 0, 0, 0.876) 28px,
-        rgba(0, 0, 0, 0.964) 32px,
-        rgba(0, 0, 0, 0.995) 35px,
-        #000000 37px
+        rgba(0, 0, 0, 0.023) 5px,
+        rgba(0, 0, 0, 0.098) 10px,
+        rgba(0, 0, 0, 0.226) 15px,
+        rgba(0, 0, 0, 0.392) 20px,
+        rgba(0, 0, 0, 0.573) 25px,
+        rgba(0, 0, 0, 0.743) 30px,
+        rgba(0, 0, 0, 0.880) 35px,
+        rgba(0, 0, 0, 0.967) 40px,
+        rgba(0, 0, 0, 0.992) 43px,
+        #000000 46px
       );
     }
 
@@ -1229,20 +1229,20 @@
       font-weight: 500;
     }
 
-    /* Circular 61x61 Persona / Agent Avatar Button (r = 30.5px, avg of 25px plus & 36px composer) */
+    /* Circular 70x70 Persona / Agent Avatar Button (+15% from 61px) */
     .t2-persona {
-      width: 61px;
-      height: 61px;
-      min-width: 61px;
-      min-height: 61px;
+      width: 70px;
+      height: 70px;
+      min-width: 70px;
+      min-height: 70px;
       padding: 0;
       border-radius: 50%;
       overflow: hidden;
     }
 
     .t2-persona svg {
-      width: 28px;
-      height: 28px;
+      width: 32px;
+      height: 32px;
       flex-shrink: 0;
       stroke: currentColor;
       fill: none;
@@ -1337,7 +1337,7 @@
     }
 
     .t2-scrub-btn {
-      width: 34px;
+      width: 32px;
       height: 38px;
       border-radius: 9999px;
       color: var(--menu-text);
@@ -1355,20 +1355,20 @@
     }
 
     .t2-scrub-btn svg {
-      width: 15px;
-      height: 15px;
+      width: 14px;
+      height: 14px;
       fill: currentColor;
       stroke: none;
     }
 
     .t2-scrub-play {
-      width: 36px;
+      width: 34px;
       color: var(--menu-active-text);
     }
 
     .t2-scrub-play svg {
-      width: 16px;
-      height: 16px;
+      width: 15px;
+      height: 15px;
       transform: translateX(1px);
     }
 
@@ -1376,27 +1376,43 @@
       transform: none;
     }
 
-    /* Compact Equal-Width Right Pills: Hands Free & Auto TTS */
+    /* Right Circular Mode Buttons: Hands Free (44x44 circle) & Auto TTS (70x70 circle matching Persona) */
     .t2-mode-pill {
-      width: 54px;
-      min-width: 54px;
-      height: var(--menu-item-h);
-      min-height: var(--menu-item-h);
-      padding: 0 6px;
-      border-radius: 9999px;
-      font-size: 11.5px;
+      padding: 0 4px;
+      border-radius: 50%;
       font-weight: 500;
-      line-height: 1.06;
-      letter-spacing: -0.01em;
       text-align: center;
       white-space: normal;
       flex-direction: column;
       gap: 0;
+      overflow: hidden;
+    }
+
+    .t2-handsfree {
+      width: var(--menu-item-h);
+      min-width: var(--menu-item-h);
+      height: var(--menu-item-h);
+      min-height: var(--menu-item-h);
+      padding: 0 2px;
+      font-size: 10px;
+      line-height: 1.04;
+      letter-spacing: -0.02em;
+    }
+
+    .t2-autotts {
+      width: 70px;
+      min-width: 70px;
+      height: 70px;
+      min-height: 70px;
+      padding: 0 6px;
+      font-size: 13.5px;
+      line-height: 1.12;
+      letter-spacing: -0.01em;
     }
 
     .t2-mode-label {
       display: block;
-      line-height: 1.08;
+      line-height: inherit;
     }
 
     @media (max-width: 380px) {
@@ -1404,17 +1420,11 @@
         --t2-gap: 5px;
         padding: 0 8px;
       }
-      .t2-mode-pill {
-        width: 50px;
-        min-width: 50px;
-        font-size: 11px;
-        padding: 0 4px;
-      }
       .t2-scrub-btn {
-        width: 30px;
+        width: 28px;
       }
       .t2-scrub-play {
-        width: 34px;
+        width: 32px;
       }
     }
 
@@ -1872,18 +1882,18 @@
     }
 
     /* ==========================================================================
-       4D. FLOATING COMPOSER CAPSULE (#2e3038, 50px #3e414c BUTTONS)
+       4D. FLOATING COMPOSER CAPSULE (#2e3038, +15% -> 83px height, 59px #3e414c BUTTONS)
        ========================================================================== */
     .composer-capsule {
       pointer-events: auto;
       margin: 0 10px;
-      min-height: 72px;
-      border-radius: 36px;
+      min-height: 83px;
+      border-radius: 41.5px;
       background-color: var(--surface-composer);
       box-shadow: 0 12px 34px rgba(0, 0, 0, 0.65);
-      padding: 11px;
+      padding: 12px;
       display: grid;
-      grid-template-columns: 50px minmax(0, 1fr) 50px 50px;
+      grid-template-columns: 59px minmax(0, 1fr) 59px 59px;
       grid-template-areas: "plus input mic send";
       align-items: center;
       gap: 8px;
@@ -1893,10 +1903,10 @@
     }
 
     .composer-capsule.is-expanded {
-      border-radius: 26px;
-      padding: 13px 11px 10px;
-      grid-template-columns: 50px minmax(0, 1fr) 50px 50px;
-      grid-template-rows: auto 50px;
+      border-radius: 30px;
+      padding: 14px 12px 11px;
+      grid-template-columns: 59px minmax(0, 1fr) 59px 59px;
+      grid-template-rows: auto 59px;
       grid-template-areas:
         "input input input input"
         "plus  .     mic   send";
@@ -1924,8 +1934,8 @@
     }
 
     .cap-btn {
-      width: 50px;
-      height: 50px;
+      width: 59px;
+      height: 59px;
       flex-shrink: 0;
       border-radius: 50%;
       background-color: var(--composer-btn);
@@ -1942,8 +1952,8 @@
     }
 
     .cap-btn svg {
-      width: 24px;
-      height: 24px;
+      width: 27px;
+      height: 27px;
       stroke: currentColor;
       fill: none;
       stroke-width: 1.95;
@@ -2675,7 +2685,7 @@
     .toast {
       position: absolute;
       left: 50%;
-      bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 168px);
+      bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 177px);
       transform: translateX(-50%) translateY(10px);
       z-index: 95;
       background-color: #282b33;
