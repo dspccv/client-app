@@ -198,6 +198,8 @@
     html, body {
       width: 100%;
       height: 100%;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
       background-color: var(--bg);
       color: var(--text-chat);
       font-family: var(--font-sans);
@@ -1048,62 +1050,38 @@
       background: transparent;
       pointer-events: none;
       padding-top: 4px;
-      padding-bottom: calc(max(24px, env(safe-area-inset-bottom)) + 16px);
+      padding-bottom: calc(max(24px, env(safe-area-inset-bottom)) + 12px);
       display: flex;
       flex-direction: column;
     }
 
-    /* Single pure black bottom fade (temporarily hidden, kept intact for reuse) */
+    /* Multi-stop cool slate-graphite fade (-15% sharper top spread, -15% muted haze) over black text-scrim */
     .bottom-dock::before {
       content: "";
-      display: none;
       position: absolute;
       left: 0;
       right: 0;
       bottom: 0;
-      top: -48px;
+      top: -40px;
       z-index: -1;
       pointer-events: none;
-      background: linear-gradient(
-        to bottom,
-        rgba(0, 0, 0, 0) 0%,
-        rgba(0, 0, 0, 0.16) 35%,
-        rgba(0, 0, 0, 0.34) 72%,
-        rgba(0, 0, 0, 0.40) 100%
-      );
-    }
-
-    /* Flat dark semi-transparent plaque (70% opacity) extending outward by --t2-gap (6px / 5px) */
-    .dock-surface {
-      --dock-pad: 6px;
-      position: relative;
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-      pointer-events: none;
-    }
-
-    .dock-surface::before {
-      content: "";
-      position: absolute;
-      left: calc(10px - var(--dock-pad));
-      right: calc(10px - var(--dock-pad));
-      top: calc(17px - var(--dock-pad));
-      bottom: calc(-1 * var(--dock-pad));
-      z-index: 0;
-      border-radius: calc(22px + var(--dock-pad)) calc(22px + var(--dock-pad)) calc(36px + var(--dock-pad)) calc(36px + var(--dock-pad));
-      background-color: rgba(22, 23, 28, 0.70);
-      pointer-events: none;
-      transition: border-radius 0.18s cubic-bezier(0.22, 1, 0.36, 1);
-    }
-
-    .dock-surface:has(.composer-capsule.is-expanded)::before {
-      border-radius: calc(22px + var(--dock-pad)) calc(22px + var(--dock-pad)) calc(26px + var(--dock-pad)) calc(26px + var(--dock-pad));
-    }
-
-    .dock-surface > * {
-      position: relative;
-      z-index: 1;
+      background:
+        linear-gradient(
+          to bottom,
+          rgba(62, 65, 76, 0) 0px,
+          rgba(62, 65, 76, 0.12) 25px,
+          rgba(62, 65, 76, 0.25) 54px,
+          rgba(62, 65, 76, 0.34) 81px,
+          rgba(62, 65, 76, 0.34) 100%
+        ),
+        linear-gradient(
+          to bottom,
+          rgba(0, 0, 0, 0) 0px,
+          rgba(0, 0, 0, 0.48) 27px,
+          rgba(0, 0, 0, 0.90) 56px,
+          #000000 80px,
+          #000000 100%
+        );
     }
 
     @media (min-width: 520px) {
@@ -1394,13 +1372,6 @@
     }
 
     @media (max-width: 380px) {
-      .dock-surface {
-        --dock-pad: 5px;
-      }
-      .dock-surface::before {
-        left: 3px;
-        right: 3px;
-      }
       .tier2-row {
         --t2-gap: 5px;
         padding: 0 8px;
@@ -2848,8 +2819,7 @@
         </svg>
       </button>
 
-      <div class="dock-surface" id="dockSurface">
-      <!-- 4A. TIER-2 ROW: [Persona 61px + Speaker 44px] | [Audio Scrub Bar] | [Hands Free + Auto TTS] -->
+      <!-- 4A. TIER-2 ROW: [Persona 50px + Speaker 44px] | [Audio Scrub Bar] | [Hands Free + Auto TTS] -->
       <div class="tier2-row" id="tier2Row">
         <div class="t2-agent-pair">
           <button class="tier2-btn t2-persona" id="personaDockBtn" aria-label="AI Persona">
@@ -2941,7 +2911,6 @@
             <polyline points="6 11 12 5 18 11"></polyline>
           </svg>
         </button>
-      </div>
       </div>
     </section>
 
