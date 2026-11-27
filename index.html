@@ -1058,33 +1058,19 @@
       flex-direction: column;
     }
 
-    /* Multi-stop cool slate-graphite fade (-15% sharper top spread, -15% muted haze) over black text-scrim */
+    /* Solid opaque #000000 plaque matching chat background:
+       - Inset 8px left/right to leave native iOS scrollbar unobstructed
+       - Extends 7.5px above the 44px Tier-2 row (matching the 7.5px scrub-bar-to-composer gap) down to screen bottom */
     .bottom-dock::before {
       content: "";
       position: absolute;
-      left: 0;
-      right: 0;
+      left: 8px;
+      right: 8px;
+      top: 13.5px;
       bottom: 0;
-      top: -40px;
       z-index: -1;
       pointer-events: none;
-      background:
-        linear-gradient(
-          to bottom,
-          rgba(62, 65, 76, 0) 0px,
-          rgba(62, 65, 76, 0.12) 25px,
-          rgba(62, 65, 76, 0.25) 54px,
-          rgba(62, 65, 76, 0.34) 81px,
-          rgba(62, 65, 76, 0.34) 100%
-        ),
-        linear-gradient(
-          to bottom,
-          rgba(0, 0, 0, 0) 0px,
-          rgba(0, 0, 0, 0.48) 27px,
-          rgba(0, 0, 0, 0.90) 56px,
-          #000000 80px,
-          #000000 100%
-        );
+      background-color: var(--bg);
     }
 
     @media (min-width: 520px) {
