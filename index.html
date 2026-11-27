@@ -772,7 +772,7 @@
       overscroll-behavior-y: contain;
       touch-action: pan-y;
       background-color: var(--bg);
-      padding: 8px 16px 196px;
+      padding: 8px 16px 207px;
       display: flex;
       flex-direction: column;
       gap: 20px;
@@ -1053,24 +1053,37 @@
       background: transparent;
       pointer-events: none;
       padding-top: 4px;
-      padding-bottom: max(20px, calc(env(safe-area-inset-bottom, 0px) - 6px));
+      padding-bottom: max(31px, calc(env(safe-area-inset-bottom, 0px) + 5px));
       display: flex;
       flex-direction: column;
     }
 
-    /* Solid opaque #000000 plaque matching chat background:
-       - Inset 8px left/right to leave native iOS scrollbar unobstructed
-       - Extends 7.5px above the 44px Tier-2 row (matching the 7.5px scrub-bar-to-composer gap) down to screen bottom */
+    /* Composer-width (left/right: 10px, scrollbar unobstructed) non-linear black fade + solid opaque #000000 base:
+       - Top edge sits 44px above Persona top (y = 4px -> top: -40px), flat horizontal line
+       - Smooth eased ramp reaches ~92% at Persona top (44px) and 100% solid #000000 at 52px (8px below Persona top)
+       - Solid opaque #000000 continues through composer middle down to screen bottom */
     .bottom-dock::before {
       content: "";
       position: absolute;
-      left: 8px;
-      right: 8px;
-      top: 13.5px;
+      left: 10px;
+      right: 10px;
+      top: -40px;
       bottom: 0;
       z-index: -1;
       pointer-events: none;
-      background-color: var(--bg);
+      background: linear-gradient(
+        to bottom,
+        rgba(0, 0, 0, 0) 0px,
+        rgba(0, 0, 0, 0.023) 8px,
+        rgba(0, 0, 0, 0.124) 16px,
+        rgba(0, 0, 0, 0.317) 24px,
+        rgba(0, 0, 0, 0.571) 32px,
+        rgba(0, 0, 0, 0.762) 38px,
+        rgba(0, 0, 0, 0.915) 44px,
+        rgba(0, 0, 0, 0.978) 48px,
+        #000000 52px,
+        #000000 100%
+      );
     }
 
     @media (min-width: 520px) {
@@ -2636,7 +2649,7 @@
     .toast {
       position: absolute;
       left: 50%;
-      bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 146px);
+      bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 157px);
       transform: translateX(-50%) translateY(10px);
       z-index: 95;
       background-color: #282b33;
