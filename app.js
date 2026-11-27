@@ -2416,22 +2416,6 @@
   floatingPanelsLayer.style.position = 'absolute';
   floatingPanelsLayer.style.inset = '0px';
 
-  const safeTopProbe = document.createElement('div');
-  safeTopProbe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;padding-top:env(safe-area-inset-top,0px);visibility:hidden;pointer-events:none;';
-  document.body.appendChild(safeTopProbe);
-
-  function getSafeAreaTopPx() {
-    const pt = parseFloat(window.getComputedStyle(safeTopProbe).paddingTop);
-    return Number.isFinite(pt) ? Math.round(pt) : 0;
-  }
-
-  function isStandalonePwa() {
-    return Boolean(
-      window.navigator.standalone === true ||
-      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
-    );
-  }
-
   let baseViewportHeight = Math.max(
     window.innerHeight || 0,
     window.visualViewport ? Math.round(window.visualViewport.height) : 0
@@ -2451,38 +2435,13 @@
     const isKbOpen = kbDelta > 100;
 
     if (isKbOpen) {
-      document.documentElement.style.height = '';
-      document.body.style.height = '';
-      appShell.style.position = 'fixed';
       appShell.style.bottom = 'auto';
       appShell.style.top = `${vTop}px`;
       appShell.style.height = `${vh}px`;
     } else {
-      const sw = window.screen ? Math.round(window.screen.width) : 0;
-      const sh = window.screen ? Math.round(window.screen.height) : 0;
-      const isLandscape = window.innerWidth > window.innerHeight;
-      const screenW = isLandscape ? Math.max(sw, sh) : Math.min(sw, sh);
-      const screenH = isLandscape ? Math.min(sw, sh) : Math.max(sw, sh);
-      const widthMatchesScreen = screenW > 0 && Math.abs(window.innerWidth - screenW) <= 4;
-      const safeTop = getSafeAreaTopPx();
-      const deficit = screenH - vh;
-
-      // Compensate iOS Standalone PWA (black-translucent + viewport-fit=cover) cold-launch bottom gap
-      if (isStandalonePwa() && widthMatchesScreen && safeTop >= 20 && deficit > 0 && deficit <= safeTop + 12) {
-        document.documentElement.style.height = `${screenH}px`;
-        document.body.style.height = `${screenH}px`;
-        appShell.style.position = 'absolute';
-        appShell.style.top = '0px';
-        appShell.style.bottom = 'auto';
-        appShell.style.height = `${screenH}px`;
-      } else {
-        document.documentElement.style.height = '';
-        document.body.style.height = '';
-        appShell.style.position = 'fixed';
-        appShell.style.top = '0px';
-        appShell.style.bottom = '0px';
-        appShell.style.height = 'auto';
-      }
+      appShell.style.top = '0px';
+      appShell.style.bottom = '0px';
+      appShell.style.height = 'auto';
     }
     bottomDock.style.bottom = '0px';
     bottomDock.style.paddingBottom = isKbOpen ? '8px' : '';
@@ -2531,10 +2490,6 @@
 
   window.addEventListener('orientationchange', () => {
     baseViewportHeight = 0;
-    scheduleViewportSync();
-  });
-
-  window.addEventListener('pageshow', () => {
     scheduleViewportSync();
   });
 
@@ -2624,7 +2579,6 @@
   });
 
   window.addEventListener('resize', () => {
-    syncViewport();
     updateComposerLayout();
     syncFloatingPanelsPosition();
     updateScrollBottomBtn();
