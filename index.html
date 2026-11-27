@@ -1054,24 +1054,33 @@
       flex-direction: column;
     }
 
-    /* Multi-stop black scrim separating floating dock from scrolling chat text */
+    /* Multi-stop cool slate-graphite fade (40% max density matching buttons/input hue) over black text-scrim */
     .bottom-dock::before {
       content: "";
       position: absolute;
       left: 0;
       right: 0;
       bottom: 0;
-      top: -36px;
+      top: -48px;
       z-index: -1;
       pointer-events: none;
-      background: linear-gradient(
-        to bottom,
-        rgba(0, 0, 0, 0) 0px,
-        rgba(0, 0, 0, 0.42) 32px,
-        rgba(0, 0, 0, 0.86) 58px,
-        #000000 80px,
-        #000000 100%
-      );
+      background:
+        linear-gradient(
+          to bottom,
+          rgba(62, 65, 76, 0) 0px,
+          rgba(62, 65, 76, 0.14) 30px,
+          rgba(62, 65, 76, 0.30) 64px,
+          rgba(62, 65, 76, 0.40) 96px,
+          rgba(62, 65, 76, 0.40) 100%
+        ),
+        linear-gradient(
+          to bottom,
+          rgba(0, 0, 0, 0) 0px,
+          rgba(0, 0, 0, 0.48) 32px,
+          rgba(0, 0, 0, 0.90) 66px,
+          #000000 94px,
+          #000000 100%
+        );
     }
 
     @media (min-width: 520px) {
@@ -1250,6 +1259,11 @@
       overflow: hidden;
       display: flex;
       align-items: center;
+      touch-action: none;
+    }
+
+    .t2-scrub-bar * {
+      touch-action: none;
     }
 
     /* Layer 1: Loaded chunks buffer (slightly darker than playback progress) */
@@ -1276,6 +1290,10 @@
       background-color: #484a52;
       pointer-events: none;
       transition: width 0.18s linear;
+    }
+
+    .t2-scrub-bar.is-scrubbing .t2-scrub-fill {
+      transition: none;
     }
 
     .t2-scrub-controls {

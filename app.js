@@ -707,10 +707,15 @@
     ttsChunkWeights: [],
     ttsChunkActualSec: [],
     ttsChunkLoaded: [],
+    ttsCanonicalChunks: [],
     ttsActiveChunkIndex: -1,
     ttsLastChunkFrac: 0,
-    ttsMaxBufferedPct: 0,
     ttsRepatching: false,
+    ttsSeekInterrupt: null,
+    ttsPendingSeek: null,
+    ttsOnResumePrefetch: null,
+    ttsScrubDragging: false,
+    ttsScrubDragPct: 0,
 
     generatingMsgId: null,
     generatingChatId: null,
@@ -4419,6 +4424,10 @@
       try { ctrl.abort(); } catch (_) {}
     }
 
+    state.ttsPendingSeek = null;
+    state.ttsSeekInterrupt = null;
+    state.ttsOnResumePrefetch = null;
+
     if (state.ttsResolveCurrentPlay) {
       const resolvePrev = state.ttsResolveCurrentPlay;
       state.ttsResolveCurrentPlay = null;
@@ -4530,6 +4539,11 @@
     state.ttsPaused = false;
     updateTtsIcons();
     setAudioSessionType('playback');
+    if (typeof state.ttsOnResumePrefetch === 'function') {
+      const fn = state.ttsOnResumePrefetch;
+      state.ttsOnResumePrefetch = null;
+      try { fn(); } catch (_) {}
+    }
 
     const desiredPitch = Math.max(0.75, Math.min(1.25, Number(state.voiceDraft.pitch) || 1.0));
     const pitchDiff = Math.abs(desiredPitch - (state.ttsAppliedPitch || 1.0));
@@ -4552,7 +4566,7 @@
     return true;
   }
 
-  function playCanonicalChunkOnSingleAudio(canonical, sessionId, onPlaybackStarted = null) {
+  function playCanonicalChunkOnSingleAudio(canonical, sessionId, onPlaybackStarted = null, startFrac = 0, startPaused = false) {
     return new Promise((resolve, reject) => {
       if (state.ttsSessionId !== sessionId) {
         resolve('aborted');
@@ -4574,6 +4588,8 @@
 
       let settled = false;
       let startedNotified = false;
+      const safeStartFrac = Math.max(0, Math.min(0.99, Number(startFrac) || 0));
+      let startOffsetApplied = safeStartFrac <= 0;
 
       const notifyStarted = () => {
         if (startedNotified || state.ttsSessionId !== sessionId) return;
@@ -4584,20 +4600,33 @@
       };
 
       let cancelHandle = null;
-      const finish = (err) => {
+      let seekHandle = null;
+      const finish = (err, reason = 'ended') => {
         if (settled) return;
         settled = true;
         if (state.ttsResolveCurrentPlay === cancelHandle) {
           state.ttsResolveCurrentPlay = null;
         }
+        if (state.ttsSeekInterrupt === seekHandle) {
+          state.ttsSeekInterrupt = null;
+        }
+        if (state.ttsOnResumePrefetch) {
+          state.ttsOnResumePrefetch = null;
+        }
+        state.ttsRepatching = false;
         ttsAudio.onended = null;
         ttsAudio.onerror = null;
         ttsAudio.onloadedmetadata = null;
         if (err) reject(err);
-        else resolve('ended');
+        else resolve(reason);
       };
-      cancelHandle = () => finish(null);
+      cancelHandle = () => finish(null, 'aborted');
+      seekHandle = () => {
+        try { ttsAudio.pause(); } catch (_) {}
+        finish(null, 'seek');
+      };
       state.ttsResolveCurrentPlay = cancelHandle;
+      state.ttsSeekInterrupt = seekHandle;
 
       const enforceRate = () => {
         if (state.ttsSessionId !== sessionId) return;
@@ -4607,29 +4636,65 @@
         try { ttsAudio.playbackRate = curRate; } catch (_) {}
       };
 
-      ttsAudio.onloadedmetadata = enforceRate;
-      ttsAudio.onended = () => finish(null);
+      const applyStartOffsetIfReady = () => {
+        if (state.ttsSessionId !== sessionId) return;
+        if (!startOffsetApplied && Number.isFinite(ttsAudio.duration) && ttsAudio.duration > 0) {
+          const targetTime = Math.max(0, Math.min(ttsAudio.duration - 0.05, safeStartFrac * ttsAudio.duration));
+          try { ttsAudio.currentTime = targetTime; } catch (_) {}
+          startOffsetApplied = true;
+          if (state.ttsPaused) {
+            state.ttsPausedTime = targetTime;
+            state.ttsPausedDuration = ttsAudio.duration;
+          }
+          state.ttsRepatching = false;
+        } else if (startPaused && Number.isFinite(ttsAudio.duration) && ttsAudio.duration > 0) {
+          state.ttsPausedTime = Number.isFinite(ttsAudio.currentTime) ? ttsAudio.currentTime : 0;
+          state.ttsPausedDuration = ttsAudio.duration;
+          state.ttsRepatching = false;
+        }
+        enforceRate();
+        updateScrubBarUI();
+      };
+
+      if (!startOffsetApplied) {
+        state.ttsRepatching = true;
+      }
+
+      ttsAudio.onloadedmetadata = applyStartOffsetIfReady;
+      ttsAudio.onended = () => finish(null, 'ended');
       ttsAudio.onerror = () => finish(new Error('Ошибка воспроизведения аудио'));
 
       ttsAudio.src = blobUrl;
       setPreservesPitch(ttsAudio, true);
       try { ttsAudio.playbackRate = playbackRate; } catch (_) {}
 
+      if (startPaused) {
+        state.ttsPaused = true;
+        state.ttsOnResumePrefetch = notifyStarted;
+        try { ttsAudio.pause(); } catch (_) {}
+        if (ttsAudio.readyState >= 1) {
+          applyStartOffsetIfReady();
+        }
+        updateTtsIcons();
+        return;
+      }
+
       const playPromise = ttsAudio.play();
       if (playPromise && typeof playPromise.then === 'function') {
         playPromise
           .then(() => {
-            enforceRate();
+            applyStartOffsetIfReady();
             notifyStarted();
           })
           .catch((err) => {
             if (state.ttsSessionId !== sessionId) {
-              finish(null);
+              finish(null, 'aborted');
             } else {
               finish(err || new Error('Автовоспроизведение заблокировано iOS'));
             }
           });
       } else {
+        applyStartOffsetIfReady();
         notifyStarted();
       }
     });
@@ -4707,10 +4772,15 @@
     state.ttsChunkWeights = chunks.map(getSpeakableCharWeight);
     state.ttsChunkActualSec = new Array(chunks.length).fill(null);
     state.ttsChunkLoaded = new Array(chunks.length).fill(false);
+    state.ttsCanonicalChunks = new Array(chunks.length).fill(null);
     state.ttsActiveChunkIndex = -1;
     state.ttsLastChunkFrac = 0;
-    state.ttsMaxBufferedPct = 0;
     state.ttsRepatching = false;
+    state.ttsPendingSeek = null;
+    state.ttsSeekInterrupt = null;
+    state.ttsOnResumePrefetch = null;
+    state.ttsScrubDragging = false;
+    state.ttsScrubDragPct = 0;
     updateTtsIcons();
 
     try {
@@ -4726,6 +4796,7 @@
           const p = fetchTtsChunkCanonicalWav(chunks[idx], ttsId, voiceApiId, controller.signal, samplingParams)
             .then((canonical) => {
               if (state.ttsSessionId === sessionId) {
+                state.ttsCanonicalChunks[idx] = canonical;
                 state.ttsChunkLoaded[idx] = true;
                 const durSec = getCanonicalWavDurationSec(canonical);
                 if (durSec) state.ttsChunkActualSec[idx] = durSec;
@@ -4741,30 +4812,58 @@
 
       ensureChunkRequested(0);
 
-      for (let i = 0; i < chunks.length; i++) {
+      let i = 0;
+      let startFrac = 0;
+      let startPaused = false;
+
+      while (i < chunks.length) {
         if (state.ttsSessionId !== sessionId) return;
 
-        const canonical = await ensureChunkRequested(i);
+        const canonical = state.ttsCanonicalChunks[i] || (await ensureChunkRequested(i));
         if (state.ttsSessionId !== sessionId) return;
+
+        if (state.ttsPendingSeek) {
+          const req = state.ttsPendingSeek;
+          state.ttsPendingSeek = null;
+          i = req.chunkIndex;
+          startFrac = req.chunkFrac;
+          startPaused = Boolean(req.paused);
+          continue;
+        }
 
         state.ttsActiveChunkIndex = i;
-        state.ttsLastChunkFrac = 0;
+        state.ttsLastChunkFrac = startFrac;
         updateScrubBarUI();
 
         // Trigger download ONLY for the single immediate next chunk (i + 1) once chunk i starts playing
-        await playCanonicalChunkOnSingleAudio(canonical, sessionId, () => {
-          if (i + 1 < chunks.length && !chunkBuffer[i + 1]) {
-            ensureChunkRequested(i + 1);
-          }
-        });
+        const playResult = await playCanonicalChunkOnSingleAudio(
+          canonical,
+          sessionId,
+          () => {
+            if (i + 1 < chunks.length && !chunkBuffer[i + 1]) {
+              ensureChunkRequested(i + 1);
+            }
+          },
+          startFrac,
+          startPaused
+        );
 
-        if (state.ttsSessionId === sessionId) {
-          state.ttsLastChunkFrac = 1;
-          updateScrubBarUI();
+        if (state.ttsSessionId !== sessionId) return;
+
+        if (playResult === 'seek' && state.ttsPendingSeek) {
+          const req = state.ttsPendingSeek;
+          state.ttsPendingSeek = null;
+          i = req.chunkIndex;
+          startFrac = req.chunkFrac;
+          startPaused = Boolean(req.paused);
+          continue;
         }
 
-        // Release reference to played chunk so GC stays lean (pristine copy lives in LRU cache)
-        chunkBuffer[i] = null;
+        state.ttsLastChunkFrac = 1;
+        updateScrubBarUI();
+        i += 1;
+        startFrac = 0;
+        startPaused = false;
       }
     } catch (err) {
       if (state.ttsSessionId !== sessionId || (err && err.name === 'AbortError')) {
@@ -4842,16 +4941,24 @@
     state.ttsChunkWeights = [];
     state.ttsChunkActualSec = [];
     state.ttsChunkLoaded = [];
+    state.ttsCanonicalChunks = [];
     state.ttsActiveChunkIndex = -1;
     state.ttsLastChunkFrac = 0;
-    state.ttsMaxBufferedPct = 0;
     state.ttsRepatching = false;
+    state.ttsSeekInterrupt = null;
+    state.ttsPendingSeek = null;
+    state.ttsOnResumePrefetch = null;
+    state.ttsScrubDragging = false;
+    state.ttsScrubDragPct = 0;
+    if (ttsScrubBar) {
+      ttsScrubBar.classList.remove('is-scrubbing');
+    }
   }
 
-  function computeTtsScrubMetrics() {
+  function computeTtsDurationModel() {
     const weights = state.ttsChunkWeights;
     if (!state.ttsPlayingMsgId || !Array.isArray(weights) || weights.length === 0) {
-      return { bufferedPct: 0, playedPct: 0 };
+      return { durs: [], totalDur: 0, loadedDur: 0, maxLoadedChunkIdx: -1, bufferedPct: 0 };
     }
 
     let sumActualSec = 0;
@@ -4867,29 +4974,48 @@
 
     const durs = new Array(weights.length);
     let totalDur = 0;
-    let loadedDur = 0;
     for (let k = 0; k < weights.length; k++) {
       const actual = state.ttsChunkActualSec[k];
       const d = (typeof actual === 'number' && actual > 0) ? actual : (weights[k] * secPerChar);
       durs[k] = d;
       totalDur += d;
-      if (state.ttsChunkLoaded[k]) {
-        loadedDur += d;
+    }
+
+    let maxLoadedChunkIdx = -1;
+    let loadedDur = 0;
+    for (let k = 0; k < weights.length; k++) {
+      if (state.ttsChunkLoaded[k] && state.ttsCanonicalChunks[k]) {
+        maxLoadedChunkIdx = k;
+        loadedDur += durs[k];
+      } else {
+        break;
       }
     }
 
-    if (totalDur <= 0) return { bufferedPct: 0, playedPct: 0 };
+    const bufferedPct = totalDur > 0 ? Math.max(0, Math.min(100, (loadedDur / totalDur) * 100)) : 0;
+    return { durs, totalDur, loadedDur, maxLoadedChunkIdx, bufferedPct };
+  }
 
-    const rawBufferedPct = Math.max(0, Math.min(100, (loadedDur / totalDur) * 100));
-    const bufferedPct = Math.max(state.ttsMaxBufferedPct, rawBufferedPct);
-    state.ttsMaxBufferedPct = bufferedPct;
+  function computeTtsScrubMetrics() {
+    const model = computeTtsDurationModel();
+    if (model.totalDur <= 0) {
+      return { bufferedPct: 0, playedPct: 0 };
+    }
+
+    const bufferedPct = model.bufferedPct;
+
+    if (state.ttsScrubDragging) {
+      const clampedDrag = Math.max(0, Math.min(bufferedPct, state.ttsScrubDragPct));
+      state.ttsScrubDragPct = clampedDrag;
+      return { bufferedPct, playedPct: clampedDrag };
+    }
 
     let playedPct = 0;
     const activeIdx = state.ttsActiveChunkIndex;
-    if (activeIdx >= 0 && activeIdx < durs.length) {
+    if (activeIdx >= 0 && activeIdx < model.durs.length) {
       let completedDur = 0;
       for (let k = 0; k < activeIdx; k++) {
-        completedDur += durs[k];
+        completedDur += model.durs[k];
       }
 
       let frac = state.ttsLastChunkFrac || 0;
@@ -4902,11 +5028,74 @@
         state.ttsLastChunkFrac = frac;
       }
 
-      const playedDur = completedDur + (durs[activeIdx] * frac);
-      playedPct = Math.max(0, Math.min(bufferedPct, (playedDur / totalDur) * 100));
+      const playedDur = completedDur + (model.durs[activeIdx] * frac);
+      playedPct = Math.max(0, Math.min(bufferedPct, (playedDur / model.totalDur) * 100));
     }
 
     return { bufferedPct, playedPct };
+  }
+
+  function mapPercentToChunkTarget(rawPct) {
+    const model = computeTtsDurationModel();
+    if (model.maxLoadedChunkIdx < 0 || model.totalDur <= 0 || model.loadedDur <= 0) {
+      return null;
+    }
+
+    const clampedPct = Math.max(0, Math.min(model.bufferedPct, Number(rawPct) || 0));
+    const maxSec = Math.max(0, model.loadedDur - 0.05);
+    const targetSec = Math.max(0, Math.min(maxSec, (clampedPct / 100) * model.totalDur));
+
+    let acc = 0;
+    for (let k = 0; k <= model.maxLoadedChunkIdx; k++) {
+      const segDur = model.durs[k];
+      if (targetSec < acc + segDur || k === model.maxLoadedChunkIdx) {
+        const localSec = Math.max(0, targetSec - acc);
+        const chunkFrac = segDur > 0 ? Math.max(0, Math.min(0.99, localSec / segDur)) : 0;
+        return { chunkIndex: k, chunkFrac, clampedPct };
+      }
+      acc += segDur;
+    }
+    return null;
+  }
+
+  function seekActiveTtsToPercent(rawPct) {
+    if (!state.ttsPlayingMsgId) return;
+    const target = mapPercentToChunkTarget(rawPct);
+    if (!target) {
+      updateScrubBarUI();
+      return;
+    }
+
+    if (
+      target.chunkIndex === state.ttsActiveChunkIndex &&
+      state.ttsCurrentChunk &&
+      ttsAudio.src &&
+      ttsAudio.src !== SILENT_WAV_URL &&
+      Number.isFinite(ttsAudio.duration) &&
+      ttsAudio.duration > 0
+    ) {
+      const newTime = Math.max(0, Math.min(ttsAudio.duration - 0.05, target.chunkFrac * ttsAudio.duration));
+      try { ttsAudio.currentTime = newTime; } catch (_) {}
+      state.ttsLastChunkFrac = target.chunkFrac;
+      if (state.ttsPaused) {
+        state.ttsPausedTime = newTime;
+        state.ttsPausedDuration = ttsAudio.duration;
+      }
+      updateScrubBarUI();
+      return;
+    }
+
+    state.ttsPendingSeek = {
+      chunkIndex: target.chunkIndex,
+      chunkFrac: target.chunkFrac,
+      paused: state.ttsPaused
+    };
+    state.ttsLastChunkFrac = target.chunkFrac;
+    if (typeof state.ttsSeekInterrupt === 'function') {
+      state.ttsSeekInterrupt();
+    } else {
+      updateScrubBarUI();
+    }
   }
 
   function updateScrubBarUI() {
@@ -4938,9 +5127,110 @@
     return null;
   }
 
+  const scrubDrag = {
+    pointerId: null,
+    startX: 0,
+    dragging: false,
+    suppressClickUntil: 0
+  };
+
+  function getScrubClampedPctForClientX(clientX) {
+    if (!ttsScrubBar) return 0;
+    const rect = ttsScrubBar.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return 0;
+    const rawPct = ((clientX - rect.left) / rect.width) * 100;
+    const { bufferedPct } = computeTtsDurationModel();
+    return Math.max(0, Math.min(bufferedPct, rawPct));
+  }
+
+  function finishScrubDrag(commitSeek) {
+    if (scrubDrag.pointerId === null) return;
+    const wasDragging = scrubDrag.dragging;
+    const pid = scrubDrag.pointerId;
+    scrubDrag.pointerId = null;
+    scrubDrag.dragging = false;
+
+    if (ttsScrubBar) {
+      ttsScrubBar.classList.remove('is-scrubbing');
+      try {
+        if (ttsScrubBar.hasPointerCapture && ttsScrubBar.hasPointerCapture(pid)) {
+          ttsScrubBar.releasePointerCapture(pid);
+        }
+      } catch (_) {}
+    }
+
+    if (wasDragging) {
+      scrubDrag.suppressClickUntil = Date.now() + 400;
+      const finalPct = state.ttsScrubDragPct;
+      state.ttsScrubDragging = false;
+      if (commitSeek) {
+        seekActiveTtsToPercent(finalPct);
+      } else {
+        updateScrubBarUI();
+      }
+    } else {
+      state.ttsScrubDragging = false;
+    }
+  }
+
+  if (ttsScrubBar) {
+    ttsScrubBar.addEventListener('pointerdown', (e) => {
+      if (state.micState !== 'idle') return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (!state.ttsPlayingMsgId) return;
+      const model = computeTtsDurationModel();
+      if (model.bufferedPct <= 0) return;
+
+      scrubDrag.pointerId = e.pointerId;
+      scrubDrag.startX = e.clientX;
+      scrubDrag.dragging = false;
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (scrubDrag.pointerId === null || e.pointerId !== scrubDrag.pointerId) return;
+      if (!state.ttsPlayingMsgId) {
+        finishScrubDrag(false);
+        return;
+      }
+
+      if (!scrubDrag.dragging) {
+        if (Math.abs(e.clientX - scrubDrag.startX) < 6) return;
+        scrubDrag.dragging = true;
+        state.ttsScrubDragging = true;
+        ttsScrubBar.classList.add('is-scrubbing');
+        try { ttsScrubBar.setPointerCapture(e.pointerId); } catch (_) {}
+      }
+
+      const clampedPct = getScrubClampedPctForClientX(e.clientX);
+      state.ttsScrubDragPct = clampedPct;
+      updateScrubBarUI();
+    });
+
+    window.addEventListener('pointerup', (e) => {
+      if (scrubDrag.pointerId === null || e.pointerId !== scrubDrag.pointerId) return;
+      if (scrubDrag.dragging) {
+        state.ttsScrubDragPct = getScrubClampedPctForClientX(e.clientX);
+      }
+      finishScrubDrag(true);
+    });
+
+    window.addEventListener('pointercancel', (e) => {
+      if (scrubDrag.pointerId === null || e.pointerId !== scrubDrag.pointerId) return;
+      finishScrubDrag(false);
+    });
+
+    ttsScrubBar.addEventListener('click', (e) => {
+      if (Date.now() < scrubDrag.suppressClickUntil) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+  }
+
   if (scrubPlayBtn) {
     scrubPlayBtn.addEventListener('click', () => {
       if (state.micState !== 'idle') return;
+      if (Date.now() < scrubDrag.suppressClickUntil) return;
       if (state.ttsPlayingMsgId) {
         togglePlayback(state.ttsPlayingMsgId, true);
         return;
