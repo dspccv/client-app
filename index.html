@@ -1085,7 +1085,7 @@
     }
 
     /* Clean vertical bottom-to-top slate gradient plaque starting flush at top of 44px button row (top: 25px = bottom of .chat-feed):
-       - Soft whitish-slate at screen bottom (#30333b), smoothly melting into pure #000000 at top edge */
+       - Muted slate at screen bottom (#222429, -30% vs v23), smoothly melting into pure #000000 at top edge */
     .bottom-dock::before {
       content: "";
       position: absolute;
@@ -1097,12 +1097,12 @@
       pointer-events: none;
       background: linear-gradient(
         to top,
-        #30333b 0%,
-        #262830 18%,
-        #1c1e24 38%,
-        #121317 60%,
-        #090a0c 78%,
-        #030304 91%,
+        #222429 0%,
+        #1b1c22 18%,
+        #141519 38%,
+        #0d0d10 60%,
+        #060708 78%,
+        #020203 91%,
         #000000 100%
       );
     }
