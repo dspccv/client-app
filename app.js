@@ -2434,8 +2434,15 @@
     const kbDelta = Math.max(window.innerHeight - vh, baseViewportHeight - vh);
     const isKbOpen = kbDelta > 100;
 
-    appShell.style.height = `${vh}px`;
-    appShell.style.top = `${vTop}px`;
+    if (isKbOpen) {
+      appShell.style.bottom = 'auto';
+      appShell.style.top = `${vTop}px`;
+      appShell.style.height = `${vh}px`;
+    } else {
+      appShell.style.top = '0px';
+      appShell.style.bottom = '0px';
+      appShell.style.height = 'auto';
+    }
     bottomDock.style.bottom = '0px';
     bottomDock.style.paddingBottom = isKbOpen ? '8px' : '';
 

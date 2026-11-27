@@ -198,7 +198,6 @@
     html, body {
       width: 100%;
       height: 100%;
-      height: 100dvh;
       background-color: var(--bg);
       color: var(--text-chat);
       font-family: var(--font-sans);
@@ -255,8 +254,8 @@
       top: 0;
       left: 0;
       right: 0;
+      bottom: 0;
       width: 100%;
-      height: 100dvh;
       margin: 0 auto;
       background-color: var(--bg);
       display: flex;
@@ -1054,7 +1053,7 @@
       flex-direction: column;
     }
 
-    /* Multi-stop cool slate-graphite fade (40% max density matching buttons/input hue) over black text-scrim */
+    /* Single pure black bottom fade (max 40% opacity at bottom, no gray/white haze) */
     .bottom-dock::before {
       content: "";
       position: absolute;
@@ -1064,23 +1063,45 @@
       top: -48px;
       z-index: -1;
       pointer-events: none;
-      background:
-        linear-gradient(
-          to bottom,
-          rgba(62, 65, 76, 0) 0px,
-          rgba(62, 65, 76, 0.14) 30px,
-          rgba(62, 65, 76, 0.30) 64px,
-          rgba(62, 65, 76, 0.40) 96px,
-          rgba(62, 65, 76, 0.40) 100%
-        ),
-        linear-gradient(
-          to bottom,
-          rgba(0, 0, 0, 0) 0px,
-          rgba(0, 0, 0, 0.48) 32px,
-          rgba(0, 0, 0, 0.90) 66px,
-          #000000 94px,
-          #000000 100%
-        );
+      background: linear-gradient(
+        to bottom,
+        rgba(0, 0, 0, 0) 0%,
+        rgba(0, 0, 0, 0.16) 35%,
+        rgba(0, 0, 0, 0.34) 72%,
+        rgba(0, 0, 0, 0.40) 100%
+      );
+    }
+
+    /* Flat dark semi-transparent plaque flush with 44px row + composer (Persona protrudes above) */
+    .dock-surface {
+      position: relative;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      pointer-events: none;
+    }
+
+    .dock-surface::before {
+      content: "";
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      top: 17px;
+      bottom: 0;
+      z-index: 0;
+      border-radius: 22px 22px 36px 36px;
+      background-color: rgba(22, 23, 28, 0.40);
+      pointer-events: none;
+      transition: border-radius 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .dock-surface:has(.composer-capsule.is-expanded)::before {
+      border-radius: 22px 22px 26px 26px;
+    }
+
+    .dock-surface > * {
+      position: relative;
+      z-index: 1;
     }
 
     @media (min-width: 520px) {
@@ -2818,7 +2839,8 @@
         </svg>
       </button>
 
-      <!-- 4A. TIER-2 ROW: [Persona 50px + Speaker 44px] | [Audio Scrub Bar] | [Hands Free + Auto TTS] -->
+      <div class="dock-surface" id="dockSurface">
+      <!-- 4A. TIER-2 ROW: [Persona 61px + Speaker 44px] | [Audio Scrub Bar] | [Hands Free + Auto TTS] -->
       <div class="tier2-row" id="tier2Row">
         <div class="t2-agent-pair">
           <button class="tier2-btn t2-persona" id="personaDockBtn" aria-label="AI Persona">
@@ -2910,6 +2932,7 @@
             <polyline points="6 11 12 5 18 11"></polyline>
           </svg>
         </button>
+      </div>
       </div>
     </section>
 
