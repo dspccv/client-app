@@ -704,6 +704,13 @@
     ttsAppliedPitch: 1.0,
     ttsActiveBlobUrl: null,
     ttsPitchRepatchTimer: null,
+    ttsChunkWeights: [],
+    ttsChunkActualSec: [],
+    ttsChunkLoaded: [],
+    ttsActiveChunkIndex: -1,
+    ttsLastChunkFrac: 0,
+    ttsMaxBufferedPct: 0,
+    ttsRepatching: false,
 
     generatingMsgId: null,
     generatingChatId: null,
@@ -1514,6 +1521,7 @@
     speaker: '<svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>',
     stopAudio: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"></rect></svg>',
     pauseAudio: '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.2" fill="currentColor" stroke="none"></rect><rect x="14" y="5" width="4" height="14" rx="1.2" fill="currentColor" stroke="none"></rect></svg>',
+    playAudio: '<svg viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4" fill="currentColor" stroke="none"></polygon></svg>',
     moreDots: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"></circle><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"></circle></svg>',
     chevron: '<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>',
     chevronRight: '<svg viewBox="0 0 24 24"><polyline points="9 6 15 12 9 18"></polyline></svg>',
@@ -1560,6 +1568,8 @@
   const personaDockBtn = document.getElementById('personaDockBtn');
   const personaDockLabel = document.getElementById('personaDockLabel');
   const audioDockBtn = document.getElementById('audioDockBtn');
+  const ttsScrubBar = document.getElementById('ttsScrubBar');
+  const scrubPlayBtn = document.getElementById('scrubPlayBtn');
   const autoTtsBtn = document.getElementById('autoTtsBtn');
 
   const statsPanel = document.getElementById('statsPanel');
@@ -3324,6 +3334,21 @@
   ttsAudio.setAttribute('playsinline', '');
   ttsAudio.preload = 'auto';
 
+  ttsAudio.addEventListener('timeupdate', () => {
+    if (!state.ttsPlayingMsgId || state.ttsPaused || state.ttsRepatching) return;
+    if (!state.ttsCurrentChunk || !ttsAudio.src || ttsAudio.src === SILENT_WAV_URL) return;
+    updateScrubBarUI();
+  });
+
+  ttsAudio.addEventListener('loadedmetadata', () => {
+    if (!state.ttsPlayingMsgId || !state.ttsCurrentChunk || !ttsAudio.src || ttsAudio.src === SILENT_WAV_URL) return;
+    const idx = state.ttsActiveChunkIndex;
+    if (idx >= 0 && !state.ttsChunkActualSec[idx] && Number.isFinite(ttsAudio.duration) && ttsAudio.duration > 0) {
+      state.ttsChunkActualSec[idx] = ttsAudio.duration * (state.ttsAppliedPitch || 1.0);
+    }
+    updateScrubBarUI();
+  });
+
   let sharedDecodeAudioCtx = null;
   const ttsOriginalWavCache = new Map();
   const MAX_TTS_CACHE_ITEMS = 40;
@@ -4416,6 +4441,7 @@
     state.ttsPausedTime = 0;
     state.ttsPausedDuration = 0;
     state.ttsPitchChangedWhilePaused = false;
+    resetTtsScrubState();
     updateTtsIcons();
   }
 
@@ -4458,13 +4484,16 @@
     revokeActiveTtsBlobUrl();
     state.ttsActiveBlobUrl = nextUrl;
 
+    state.ttsRepatching = true;
     ttsAudio.onloadedmetadata = () => {
       if (state.ttsSessionId !== sessionId) return;
       if (progress > 0 && Number.isFinite(ttsAudio.duration) && ttsAudio.duration > 0) {
         try { ttsAudio.currentTime = Math.min(ttsAudio.duration - 0.05, progress * ttsAudio.duration); } catch (_) {}
       }
+      state.ttsRepatching = false;
       setPreservesPitch(ttsAudio, true);
       try { ttsAudio.playbackRate = playbackRate; } catch (_) {}
+      updateScrubBarUI();
     };
     ttsAudio.onended = oldOnEnded;
     ttsAudio.onerror = oldOnError;
@@ -4675,6 +4704,13 @@
     state.ttsPausedTime = 0;
     state.ttsPausedDuration = 0;
     state.ttsPitchChangedWhilePaused = false;
+    state.ttsChunkWeights = chunks.map(getSpeakableCharWeight);
+    state.ttsChunkActualSec = new Array(chunks.length).fill(null);
+    state.ttsChunkLoaded = new Array(chunks.length).fill(false);
+    state.ttsActiveChunkIndex = -1;
+    state.ttsLastChunkFrac = 0;
+    state.ttsMaxBufferedPct = 0;
+    state.ttsRepatching = false;
     updateTtsIcons();
 
     try {
@@ -4687,7 +4723,16 @@
         if (idx < 0 || idx >= chunks.length) return null;
         if (state.ttsSessionId !== sessionId) return null;
         if (!chunkBuffer[idx]) {
-          const p = fetchTtsChunkCanonicalWav(chunks[idx], ttsId, voiceApiId, controller.signal, samplingParams);
+          const p = fetchTtsChunkCanonicalWav(chunks[idx], ttsId, voiceApiId, controller.signal, samplingParams)
+            .then((canonical) => {
+              if (state.ttsSessionId === sessionId) {
+                state.ttsChunkLoaded[idx] = true;
+                const durSec = getCanonicalWavDurationSec(canonical);
+                if (durSec) state.ttsChunkActualSec[idx] = durSec;
+                updateScrubBarUI();
+              }
+              return canonical;
+            });
           p.catch(() => {});
           chunkBuffer[idx] = p;
         }
@@ -4702,12 +4747,21 @@
         const canonical = await ensureChunkRequested(i);
         if (state.ttsSessionId !== sessionId) return;
 
+        state.ttsActiveChunkIndex = i;
+        state.ttsLastChunkFrac = 0;
+        updateScrubBarUI();
+
         // Trigger download ONLY for the single immediate next chunk (i + 1) once chunk i starts playing
         await playCanonicalChunkOnSingleAudio(canonical, sessionId, () => {
           if (i + 1 < chunks.length && !chunkBuffer[i + 1]) {
             ensureChunkRequested(i + 1);
           }
         });
+
+        if (state.ttsSessionId === sessionId) {
+          state.ttsLastChunkFrac = 1;
+          updateScrubBarUI();
+        }
 
         // Release reference to played chunk so GC stays lean (pristine copy lives in LRU cache)
         chunkBuffer[i] = null;
@@ -4731,6 +4785,7 @@
         state.ttsPausedTime = 0;
         state.ttsPausedDuration = 0;
         state.ttsPitchChangedWhilePaused = false;
+        resetTtsScrubState();
         updateTtsIcons();
       }
     }
@@ -4746,10 +4801,164 @@
     btn.setAttribute('aria-label', isPlaying ? 'Пауза' : (isPaused ? 'Продолжить озвучку' : 'Озвучить'));
   }
 
+  function getCanonicalWavDurationSec(canonical) {
+    if (!canonical || !canonical.isPatchableWav || !canonical.originalWav) return null;
+    const byteRate = (canonical.origSampleRate || 0) * (canonical.blockAlign || 0);
+    if (!byteRate) return null;
+    const buf = canonical.originalWav;
+    let dataBytes = Math.max(0, buf.byteLength - 44);
+    if (buf.byteLength >= 44) {
+      const view = new DataView(buf);
+      let off = 12;
+      while (off + 8 <= buf.byteLength) {
+        const id = String.fromCharCode(
+          view.getUint8(off),
+          view.getUint8(off + 1),
+          view.getUint8(off + 2),
+          view.getUint8(off + 3)
+        );
+        const size = view.getUint32(off + 4, true);
+        if (id === 'data') {
+          dataBytes = Math.min(size, Math.max(0, buf.byteLength - (off + 8)));
+          break;
+        }
+        off += 8 + size + (size % 2);
+      }
+    }
+    const sec = dataBytes / byteRate;
+    return Number.isFinite(sec) && sec > 0 ? sec : null;
+  }
+
+  function getSpeakableCharWeight(chunkText) {
+    if (!chunkText) return 1;
+    const stripped = String(chunkText)
+      .replace(TTS_ANY_TOKEN_RE, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return Math.max(1, stripped.length);
+  }
+
+  function resetTtsScrubState() {
+    state.ttsChunkWeights = [];
+    state.ttsChunkActualSec = [];
+    state.ttsChunkLoaded = [];
+    state.ttsActiveChunkIndex = -1;
+    state.ttsLastChunkFrac = 0;
+    state.ttsMaxBufferedPct = 0;
+    state.ttsRepatching = false;
+  }
+
+  function computeTtsScrubMetrics() {
+    const weights = state.ttsChunkWeights;
+    if (!state.ttsPlayingMsgId || !Array.isArray(weights) || weights.length === 0) {
+      return { bufferedPct: 0, playedPct: 0 };
+    }
+
+    let sumActualSec = 0;
+    let sumActualWeight = 0;
+    for (let k = 0; k < weights.length; k++) {
+      const sec = state.ttsChunkActualSec[k];
+      if (typeof sec === 'number' && sec > 0) {
+        sumActualSec += sec;
+        sumActualWeight += weights[k];
+      }
+    }
+    const secPerChar = sumActualWeight > 0 ? (sumActualSec / sumActualWeight) : 0.068;
+
+    const durs = new Array(weights.length);
+    let totalDur = 0;
+    let loadedDur = 0;
+    for (let k = 0; k < weights.length; k++) {
+      const actual = state.ttsChunkActualSec[k];
+      const d = (typeof actual === 'number' && actual > 0) ? actual : (weights[k] * secPerChar);
+      durs[k] = d;
+      totalDur += d;
+      if (state.ttsChunkLoaded[k]) {
+        loadedDur += d;
+      }
+    }
+
+    if (totalDur <= 0) return { bufferedPct: 0, playedPct: 0 };
+
+    const rawBufferedPct = Math.max(0, Math.min(100, (loadedDur / totalDur) * 100));
+    const bufferedPct = Math.max(state.ttsMaxBufferedPct, rawBufferedPct);
+    state.ttsMaxBufferedPct = bufferedPct;
+
+    let playedPct = 0;
+    const activeIdx = state.ttsActiveChunkIndex;
+    if (activeIdx >= 0 && activeIdx < durs.length) {
+      let completedDur = 0;
+      for (let k = 0; k < activeIdx; k++) {
+        completedDur += durs[k];
+      }
+
+      let frac = state.ttsLastChunkFrac || 0;
+      if (state.ttsPaused) {
+        if (state.ttsPausedDuration > 0) {
+          frac = Math.max(0, Math.min(1, (state.ttsPausedTime || 0) / state.ttsPausedDuration));
+        }
+      } else if (!state.ttsRepatching && ttsAudio.src && ttsAudio.src !== SILENT_WAV_URL && Number.isFinite(ttsAudio.duration) && ttsAudio.duration > 0) {
+        frac = Math.max(0, Math.min(1, (ttsAudio.currentTime || 0) / ttsAudio.duration));
+        state.ttsLastChunkFrac = frac;
+      }
+
+      const playedDur = completedDur + (durs[activeIdx] * frac);
+      playedPct = Math.max(0, Math.min(bufferedPct, (playedDur / totalDur) * 100));
+    }
+
+    return { bufferedPct, playedPct };
+  }
+
+  function updateScrubBarUI() {
+    const isPlaying = Boolean(state.ttsPlayingMsgId && !state.ttsPaused);
+    const isPaused = Boolean(state.ttsPlayingMsgId && state.ttsPaused);
+
+    if (scrubPlayBtn) {
+      scrubPlayBtn.innerHTML = isPlaying ? ICONS.pauseAudio : ICONS.playAudio;
+      scrubPlayBtn.classList.toggle('is-playing', isPlaying);
+      scrubPlayBtn.setAttribute('aria-label', isPlaying ? 'Пауза' : (isPaused ? 'Продолжить озвучку' : 'Озвучить последнее сообщение'));
+    }
+
+    if (ttsScrubBar) {
+      const { bufferedPct, playedPct } = computeTtsScrubMetrics();
+      ttsScrubBar.style.setProperty('--scrub-buffered', `${bufferedPct.toFixed(2)}%`);
+      ttsScrubBar.style.setProperty('--scrub-progress', `${playedPct.toFixed(2)}%`);
+    }
+  }
+
+  function getLastPlayableAssistantMessage() {
+    const chat = getActiveChat();
+    if (!chat || !Array.isArray(chat.messages)) return null;
+    for (let i = chat.messages.length - 1; i >= 0; i--) {
+      const m = chat.messages[i];
+      if (m && m.role === 'assistant' && !m.isError && !m.liveThinking && (m.plainText || '').trim()) {
+        return m;
+      }
+    }
+    return null;
+  }
+
+  if (scrubPlayBtn) {
+    scrubPlayBtn.addEventListener('click', () => {
+      if (state.micState !== 'idle') return;
+      if (state.ttsPlayingMsgId) {
+        togglePlayback(state.ttsPlayingMsgId, true);
+        return;
+      }
+      const lastAi = getLastPlayableAssistantMessage();
+      if (!lastAi) {
+        showToast('Нет ответа ИИ для озвучки');
+        return;
+      }
+      togglePlayback(lastAi.id, true);
+    });
+  }
+
   function updateTtsIcons() {
     document.querySelectorAll('[data-tts-btn]').forEach((btn) => {
       applyTtsButtonState(btn, btn.dataset.ttsBtn);
     });
+    updateScrubBarUI();
   }
 
   /* =========================================================================
