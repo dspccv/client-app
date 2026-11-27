@@ -677,6 +677,7 @@
     },
     balanceLoading: false,
     balanceError: '',
+    balanceAccordionOpen: false,
     statsTickTimer: null,
 
     ttsVoicesByModel: {},
@@ -877,9 +878,32 @@
   function syncBalanceButtonUI() {
     if (!balanceBtnVal) return;
     const bal = getAccountDisplayBalance();
-    const text = bal !== null ? `${formatUsd3(bal)}$` : '0.000$';
+    const text = bal !== null ? `$${formatUsd3(bal)}` : '$0.000';
     balanceBtnVal.textContent = text;
     balanceBtnVal.dataset.label = text;
+  }
+
+  function isBalanceAccordionVisible() {
+    return Boolean(state.balanceAccordionOpen && drawer && drawer.classList.contains('open'));
+  }
+
+  function stopStatsTickTimer() {
+    if (state.statsTickTimer) {
+      clearInterval(state.statsTickTimer);
+      state.statsTickTimer = null;
+    }
+  }
+
+  function startStatsTickTimer() {
+    stopStatsTickTimer();
+    if (!state.balanceAccordionOpen) return;
+    state.statsTickTimer = setInterval(() => {
+      if (isBalanceAccordionVisible()) {
+        renderStatsPanelContent();
+      } else {
+        stopStatsTickTimer();
+      }
+    }, 30000);
   }
 
   function getDailyFreeQuotaLimit() {
@@ -935,7 +959,7 @@
       state.keyInfo = { limit: null, limitRemaining: null, usageDaily: null, usageTotal: null, isFreeTier: null, updatedAt: 0 };
       state.balanceError = '';
       syncBalanceButtonUI();
-      if (state.activeBottomPanel === 'stats') renderStatsPanelContent();
+      if (state.balanceAccordionOpen) renderStatsPanelContent();
       return;
     }
 
@@ -943,7 +967,7 @@
     state.balanceLoading = true;
     state.balanceError = '';
 
-    if (state.activeBottomPanel === 'stats') {
+    if (state.balanceAccordionOpen) {
       renderStatsPanelContent();
     }
 
@@ -1019,7 +1043,7 @@
     } finally {
       state.balanceLoading = false;
       syncBalanceButtonUI();
-      if (state.activeBottomPanel === 'stats') {
+      if (state.balanceAccordionOpen) {
         renderStatsPanelContent();
       }
     }
@@ -1474,7 +1498,7 @@
       if (state.openPopover === 'model') {
         renderModelDropdownContent();
       }
-      if (state.activeBottomPanel === 'stats') {
+      if (state.balanceAccordionOpen) {
         renderStatsPanelContent();
       }
     }
@@ -1530,7 +1554,8 @@
   const modelBtnLabel = document.getElementById('modelBtnLabel');
   const thinkingBtnLabel = document.getElementById('thinkingBtnLabel');
 
-  const statsDropdownBtn = document.getElementById('statsDropdownBtn');
+  const balanceAccordionBtn = document.getElementById('balanceAccordionBtn');
+  const balanceAccordionCollapse = document.getElementById('balanceAccordionCollapse');
   const balanceBtnVal = document.getElementById('balanceBtnVal');
   const personaDockBtn = document.getElementById('personaDockBtn');
   const personaDockLabel = document.getElementById('personaDockLabel');
@@ -2605,6 +2630,7 @@
   }
 
   function renderStatsPanelContent() {
+    if (!statsPanel) return;
     const { byKey, totalCost24h, totalFreeReqs24h } = aggregateUsage24h();
     const hasOrKey = Boolean((state.apiKeys.openrouter || '').trim());
     const accBal = getAccountDisplayBalance();
@@ -2808,37 +2834,19 @@
       closePopover();
     }
 
-    if (state.statsTickTimer) {
-      clearInterval(state.statsTickTimer);
-      state.statsTickTimer = null;
-    }
-
-    if (nextPanel === 'stats') {
-      renderStatsPanelContent();
-      fetchOpenRouterBalance(false);
-      state.statsTickTimer = setInterval(() => {
-        if (state.activeBottomPanel === 'stats') {
-          renderStatsPanelContent();
-        }
-      }, 30000);
-    }
-
     state.activeBottomPanel = nextPanel;
 
     if (nextPanel !== null) {
       syncFloatingPanelsPosition();
     }
 
-    const isStats = nextPanel === 'stats';
     const isAudio = nextPanel === 'audio';
     const isPersona = nextPanel === 'persona';
 
-    statsPanel.classList.toggle('open', isStats);
     audioPanel.classList.toggle('open', isAudio);
     personaPanel.classList.toggle('open', isPersona);
     dockScrim.classList.toggle('visible', nextPanel !== null);
 
-    statsDropdownBtn.classList.toggle('is-active', isStats);
     audioDockBtn.classList.toggle('is-active', isAudio);
     personaDockBtn.classList.toggle('is-active', isPersona);
 
@@ -2851,7 +2859,6 @@
     setBottomPanel(wasOpen ? null : panelName);
   }
 
-  statsDropdownBtn.addEventListener('click', () => toggleBottomPanel('stats'));
   audioDockBtn.addEventListener('click', () => toggleBottomPanel('audio'));
   personaDockBtn.addEventListener('click', () => toggleBottomPanel('persona'));
   dockScrim.addEventListener('click', () => setBottomPanel(null));
@@ -6074,8 +6081,14 @@
     });
 
     const dockLabel = activeSaved.name.trim() ? activeSaved.name.trim() : 'AI Persona';
-    personaDockLabel.textContent = dockLabel;
-    personaDockLabel.dataset.label = dockLabel;
+    if (personaDockBtn) {
+      personaDockBtn.setAttribute('aria-label', dockLabel);
+      personaDockBtn.title = dockLabel;
+    }
+    if (personaDockLabel) {
+      personaDockLabel.textContent = dockLabel;
+      personaDockLabel.dataset.label = dockLabel;
+    }
 
     personaNameInput.value = state.personaDraft.name;
     personaInstructionsInput.value = state.personaDraft.instructions;
@@ -7817,10 +7830,17 @@
     drawerBackdrop.classList.add('open');
     drawer.setAttribute('aria-hidden', 'false');
     syncDrawerSettingsUI();
+    syncBalanceButtonUI();
+    if (state.balanceAccordionOpen) {
+      renderStatsPanelContent();
+      fetchOpenRouterBalance(false);
+      startStatsTickTimer();
+    }
     renderChatList();
   }
 
   function closeDrawer() {
+    stopStatsTickTimer();
     endDragSelect();
     closeContextMenu();
     state.renamingChatId = null;
@@ -7852,6 +7872,23 @@
     apiAccordionCollapse.classList.toggle('open', isOpen);
     apiAccordionBtn.setAttribute('aria-expanded', String(isOpen));
   });
+
+  if (balanceAccordionBtn && balanceAccordionCollapse) {
+    balanceAccordionBtn.addEventListener('click', () => {
+      if (state.micState !== 'idle') return;
+      const isOpen = balanceAccordionBtn.classList.toggle('open');
+      balanceAccordionCollapse.classList.toggle('open', isOpen);
+      balanceAccordionBtn.setAttribute('aria-expanded', String(isOpen));
+      state.balanceAccordionOpen = isOpen;
+      if (isOpen) {
+        renderStatsPanelContent();
+        fetchOpenRouterBalance(false);
+        startStatsTickTimer();
+      } else {
+        stopStatsTickTimer();
+      }
+    });
+  }
 
   document.querySelectorAll('[data-toggle-pw]').forEach((btn) => {
     btn.addEventListener('click', () => {

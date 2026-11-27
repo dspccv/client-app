@@ -1103,14 +1103,15 @@
     }
 
     /* ==========================================================================
-       4A. TIER-2 ROW (FIX #2: #2e3038 OFF / #cfd2da + #121316 ACTIVE, ZERO FLICKER)
+       4A. TIER-2 ROW (Agent Circle + Speaker Circle | Scrub Bar | Hands Free + Auto TTS)
        ========================================================================== */
     .tier2-row {
+      --t2-gap: 6px;
       display: flex;
-      align-items: center;
-      gap: 6px;
+      align-items: flex-end;
+      gap: var(--t2-gap);
       padding: 0 10px;
-      margin-bottom: 10px;
+      margin-bottom: 7.5px;
       width: 100%;
       pointer-events: none;
       transform: translate3d(0, 0, 0);
@@ -1119,11 +1120,27 @@
       contain: layout style;
     }
 
+    .t2-agent-pair {
+      display: inline-flex;
+      align-items: flex-end;
+      gap: var(--t2-gap);
+      flex-shrink: 0;
+      pointer-events: none;
+    }
+
+    .t2-modes-pair {
+      display: inline-flex;
+      align-items: flex-end;
+      gap: var(--t2-gap);
+      flex-shrink: 0;
+      pointer-events: none;
+    }
+
     .tier2-btn {
       pointer-events: auto;
       height: var(--menu-item-h);
       min-height: var(--menu-item-h);
-      padding: 0 11px;
+      padding: 0 10px;
       border-radius: 9999px;
       background-color: var(--surface-composer);
       color: var(--menu-text);
@@ -1140,7 +1157,11 @@
       flex-shrink: 0;
       box-shadow: 0 4px 16px rgba(0, 0, 0, 0.52);
       -webkit-tap-highlight-color: transparent;
-      transition: background-color 0.12s ease, color 0.12s ease;
+      transition: background-color 0.12s ease, color 0.12s ease, transform 0.1s ease;
+    }
+
+    .tier2-btn:active {
+      transform: scale(0.94);
     }
 
     /* Pressed / active Tier-2 pills use IDENTICAL Save button colors (#cfd2da / #121316) */
@@ -1150,31 +1171,20 @@
       font-weight: 500;
     }
 
-    /* Zero-height bold width reservation prevents horizontal micro-shift on 400 -> 500 */
-    .t2-text {
-      display: inline-block;
-      line-height: 1.1;
-      text-align: center;
-    }
-
-    .t2-text::after {
-      content: attr(data-label);
-      font-weight: 500;
-      height: 0;
+    /* Circular 61x61 Persona / Agent Avatar Button (r = 30.5px, avg of 25px plus & 36px composer) */
+    .t2-persona {
+      width: 61px;
+      height: 61px;
+      min-width: 61px;
+      min-height: 61px;
+      padding: 0;
+      border-radius: 50%;
       overflow: hidden;
-      visibility: hidden;
-      display: block;
-      pointer-events: none;
     }
 
-    .t2-balance {
-      margin-right: auto;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .t2-balance svg {
-      width: 14px;
-      height: 14px;
+    .t2-persona svg {
+      width: 28px;
+      height: 28px;
       flex-shrink: 0;
       stroke: currentColor;
       fill: none;
@@ -1183,53 +1193,141 @@
       stroke-linejoin: round;
     }
 
-    .t2-persona {
-      flex: 0 1 auto;
-      min-width: 0;
-      overflow: hidden;
-    }
-
-    .t2-persona .t2-text {
-      display: block;
-      max-width: 100%;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
+    /* Circular 44x44 Speaker Button paired closely next to Persona */
     .t2-audio {
-      gap: 3px;
+      width: var(--menu-item-h);
+      height: var(--menu-item-h);
+      min-width: var(--menu-item-h);
+      min-height: var(--menu-item-h);
+      padding: 0;
+      border-radius: 50%;
     }
 
     .t2-audio svg {
-      width: 16px;
-      height: 16px;
+      width: 18px;
+      height: 18px;
       flex-shrink: 0;
       stroke: currentColor;
       fill: none;
-      stroke-width: 1.85;
+      stroke-width: 1.9;
       stroke-linecap: round;
       stroke-linejoin: round;
     }
 
-    .t2-audio-slash {
-      opacity: 0.45;
-      font-weight: 400;
-      line-height: 1;
-      margin: 0 1px;
+    /* Wide TTS Audio Scrub Bar filling all space between Speaker and Right Modes */
+    .t2-scrub-bar {
+      --scrub-progress: 34%;
+      pointer-events: auto;
+      position: relative;
+      flex: 1;
+      min-width: 0;
+      height: var(--menu-item-h);
+      min-height: var(--menu-item-h);
+      border-radius: 9999px;
+      background-color: var(--surface-composer);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.52);
+      overflow: hidden;
+      display: flex;
+      align-items: center;
     }
 
-    .t2-autotts {
+    .t2-scrub-fill {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: var(--scrub-progress);
+      background-color: rgba(207, 210, 218, 0.16);
+      pointer-events: none;
+      transition: width 0.15s linear;
+    }
+
+    .t2-scrub-controls {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      padding: 0 3px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .t2-scrub-btn {
+      width: 34px;
+      height: 38px;
+      border-radius: 9999px;
+      color: var(--menu-text);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       flex-shrink: 0;
+      transition: background-color 0.12s ease, color 0.12s ease, transform 0.1s ease;
+    }
+
+    .t2-scrub-btn:active {
+      background-color: rgba(255, 255, 255, 0.08);
+      color: var(--menu-active-text);
+      transform: scale(0.92);
+    }
+
+    .t2-scrub-btn svg {
+      width: 15px;
+      height: 15px;
+      fill: currentColor;
+      stroke: none;
+    }
+
+    .t2-scrub-play {
+      width: 36px;
+      color: var(--menu-active-text);
+    }
+
+    .t2-scrub-play svg {
+      width: 16px;
+      height: 16px;
+      transform: translateX(1px);
+    }
+
+    /* Compact Equal-Width Right Pills: Hands Free & Auto TTS */
+    .t2-mode-pill {
+      width: 54px;
+      min-width: 54px;
+      height: var(--menu-item-h);
+      min-height: var(--menu-item-h);
+      padding: 0 6px;
+      border-radius: 9999px;
+      font-size: 11.5px;
+      font-weight: 500;
+      line-height: 1.06;
+      letter-spacing: -0.01em;
+      text-align: center;
+      white-space: normal;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .t2-mode-label {
+      display: block;
+      line-height: 1.08;
     }
 
     @media (max-width: 380px) {
       .tier2-row {
+        --t2-gap: 5px;
         padding: 0 8px;
-        gap: 5px;
       }
-      .tier2-btn {
-        padding: 0 9.5px;
+      .t2-mode-pill {
+        width: 50px;
+        min-width: 50px;
+        font-size: 11px;
+        padding: 0 4px;
+      }
+      .t2-scrub-btn {
+        width: 30px;
+      }
+      .t2-scrub-play {
+        width: 34px;
       }
     }
 
@@ -1290,11 +1388,32 @@
         visibility 0s linear 0s;
     }
 
-    .slide-panel.stats-panel {
-      right: auto;
-      width: 286px;
-      max-width: calc(100% - 20px);
-      padding: 12px 14px;
+    /* Balance & Billing Accordion Header Value + Inner Drawer Stats Styling */
+    .accordion-trigger-right {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .accordion-balance-val {
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--menu-active-text);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.01em;
+    }
+
+    .balance-accordion-body {
+      padding: 2px 11px 12px;
+    }
+
+    .balance-accordion-body .stats-quota-box {
+      background: var(--bg-drawer-tab-active);
+    }
+
+    .balance-accordion-body .stats-table {
+      background: var(--bg-drawer-input);
     }
 
     .stats-card {
@@ -2641,38 +2760,57 @@
         </svg>
       </button>
 
-      <!-- 4A. TIER-2 ROW (44px, 9999px pill radius, #2e3038 off / #cfd2da active, zero flicker) -->
+      <!-- 4A. TIER-2 ROW: [Persona 50px + Speaker 44px] | [Audio Scrub Bar] | [Hands Free + Auto TTS] -->
       <div class="tier2-row" id="tier2Row">
-        <button class="tier2-btn t2-balance" id="statsDropdownBtn" aria-label="Баланс и расходы">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="12" r="9"></circle>
-            <path d="M14.8 9.2c-.5-.8-1.5-1.2-2.7-1.2-1.5 0-2.6.8-2.6 1.9 0 1.2 1 1.7 2.6 2 1.7.3 2.8.9 2.8 2.1 0 1.2-1.2 2-2.9 2-1.3 0-2.4-.5-3-1.3"></path>
-            <line x1="12" y1="6.3" x2="12" y2="8"></line>
-            <line x1="12" y1="16" x2="12" y2="17.7"></line>
-          </svg>
-          <span class="t2-text" id="balanceBtnVal" data-label="0.000$">0.000$</span>
-        </button>
+        <div class="t2-agent-pair">
+          <button class="tier2-btn t2-persona" id="personaDockBtn" aria-label="AI Persona">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="8.5" r="4"></circle>
+              <path d="M4.5 20c1.2-3.6 4.1-5.5 7.5-5.5s6.3 1.9 7.5 5.5"></path>
+            </svg>
+          </button>
 
-        <button class="tier2-btn t2-persona" id="personaDockBtn" aria-label="AI Persona">
-          <span class="t2-text" id="personaDockLabel" data-label="AI Persona">AI Persona</span>
-        </button>
+          <button class="tier2-btn t2-audio" id="audioDockBtn" aria-label="Настройки озвучки и микрофона">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+              <path d="M18.6 5.4a9 9 0 0 1 0 13.2"></path>
+            </svg>
+          </button>
+        </div>
 
-        <button class="tier2-btn t2-audio" id="audioDockBtn" aria-label="Настройки озвучки и микрофона">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-          </svg>
-          <span class="t2-audio-slash" aria-hidden="true">/</span>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="9" y="2" width="6" height="12" rx="3"></rect>
-            <path d="M5 10a7 7 0 0 0 14 0"></path>
-            <line x1="12" y1="19" x2="12" y2="22"></line>
-          </svg>
-        </button>
+        <div class="t2-scrub-bar" id="ttsScrubBar" role="group" aria-label="Прогресс озвучки">
+          <div class="t2-scrub-fill" id="ttsScrubFill"></div>
+          <div class="t2-scrub-controls">
+            <button class="t2-scrub-btn" id="scrubRewindBtn" type="button" aria-label="Перемотать назад">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <polygon points="11 19 2 12 11 5 11 19"></polygon>
+                <polygon points="22 19 13 12 22 5 22 19"></polygon>
+              </svg>
+            </button>
+            <button class="t2-scrub-btn t2-scrub-play" id="scrubPlayBtn" type="button" aria-label="Воспроизвести / пауза">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <polygon points="6 4 20 12 6 20 6 4"></polygon>
+              </svg>
+            </button>
+            <button class="t2-scrub-btn" id="scrubForwardBtn" type="button" aria-label="Перемотать вперёд">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <polygon points="13 19 22 12 13 5 13 19"></polygon>
+                <polygon points="2 19 11 12 2 5 2 19"></polygon>
+              </svg>
+            </button>
+          </div>
+        </div>
 
-        <button class="tier2-btn t2-autotts" id="autoTtsBtn" aria-pressed="false">
-          <span class="t2-text" data-label="Auto TTS">Auto TTS</span>
-        </button>
+        <div class="t2-modes-pair">
+          <button class="tier2-btn t2-mode-pill t2-handsfree" id="handsFreeBtn" type="button" aria-pressed="false" aria-label="Hands Free">
+            <span class="t2-mode-label">Hands<br>Free</span>
+          </button>
+
+          <button class="tier2-btn t2-mode-pill t2-autotts" id="autoTtsBtn" type="button" aria-pressed="false" aria-label="Auto TTS">
+            <span class="t2-mode-label">Auto<br>TTS</span>
+          </button>
+        </div>
       </div>
 
       <!-- 4D. FLOATING COMPOSER CAPSULE (#2e3038, 50px #3e414c buttons) -->
@@ -2720,9 +2858,6 @@
          DECOUPLED FLOATING OVERLAY PANELS LAYER (z-index: 55)
          ===================================================================== -->
     <div class="floating-panels-layer" id="floatingPanelsLayer">
-      <!-- Balance Breakdown Panel -->
-      <div class="slide-panel stats-panel" id="statsPanel" role="dialog" aria-label="Баланс и расходы"></div>
-
       <!-- 4B. Audio (Voice & Mic) Panel (#1e1f24) -->
       <div class="slide-panel" id="audioPanel" role="dialog" aria-label="Настройки озвучки и микрофона">
         <div class="panel-presets-row" id="voicePresetGroup">
@@ -2879,6 +3014,24 @@
                     </button>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Collapsible Balance & Billing Accordion -->
+        <div class="drawer-section-card">
+          <button class="accordion-trigger" id="balanceAccordionBtn" aria-expanded="false">
+            <span>Balance &amp; Billing</span>
+            <span class="accordion-trigger-right">
+              <span class="accordion-balance-val" id="balanceBtnVal">$0.000</span>
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </span>
+          </button>
+          <div class="accordion-collapse" id="balanceAccordionCollapse">
+            <div class="accordion-inner">
+              <div class="accordion-body balance-accordion-body">
+                <div id="statsPanel" aria-label="Balance and Billing"></div>
               </div>
             </div>
           </div>
