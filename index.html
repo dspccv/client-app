@@ -321,6 +321,9 @@
       border-radius: 50%;
       background-color: var(--bg-header-btn);
       color: var(--text-header);
+      box-shadow:
+        inset 0 0.5px 0 rgba(255, 255, 255, 0.05),
+        inset 0 -0.5px 0 rgba(255, 255, 255, 0.025);
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -1084,8 +1087,9 @@
       flex-direction: column;
     }
 
-    /* Clean vertical bottom-to-top slate gradient plaque (backing starts at top: 25px = bottom of .chat-feed):
-       - Dimmed -15% vs v24 (#1d1f23 at bottom), fully fading to pure #000000 at the vertical center of the 44px Tier-2 button row (22px below top: 25px) */
+    /* Exact 1:1 vertical bottom-to-top slate gradient matched pixel-by-pixel to IMG_8114.png:
+       - Spans bottom: 0 (#1e1f23) up to top: 25px (#000000 at top edge of 44px Tier-2 row, ~180.5px on iPhone 15 Pro Max)
+       - Two-stage curve with smooth slate plateau (#101012..#0e0e10) behind composer capsule and silky fade across Tier-2 row */
     .bottom-dock::before {
       content: "";
       position: absolute;
@@ -1095,18 +1099,22 @@
       bottom: 0;
       z-index: -1;
       pointer-events: none;
-      background:
-        linear-gradient(
-          to top,
-          #1d1f23 0%,
-          #17181d 18%,
-          #111215 38%,
-          #0b0b0e 60%,
-          #050607 78%,
-          #020203 91%,
-          #000000 100%
-        ) left bottom / 100% calc(100% - 22px) no-repeat,
-        #000000;
+      background: linear-gradient(
+        to top,
+        #1e1f23 0%,
+        #1b1c20 8%,
+        #18181c 16%,
+        #151419 24%,
+        #121215 32%,
+        #101012 42%,
+        #0f0f11 55%,
+        #0e0e10 68%,
+        #0c0c0e 76%,
+        #09090b 82%,
+        #050507 88%,
+        #020203 94%,
+        #000000 100%
+      );
     }
 
     /* Silky 13-stop eased black text fade shifted up by 7px (~1/6 of 44px Auto TTS):
@@ -1193,6 +1201,8 @@
        ========================================================================== */
     .tier2-row {
       --t2-gap: 6px;
+      position: relative;
+      z-index: 2;
       display: flex;
       align-items: flex-end;
       gap: var(--t2-gap);
@@ -1241,7 +1251,12 @@
       gap: 4px;
       white-space: nowrap;
       flex-shrink: 0;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.42);
+      box-shadow:
+        inset 0 0.5px 0 rgba(255, 255, 255, 0.065),
+        inset 0 -0.5px 0 rgba(255, 255, 255, 0.045),
+        inset 0 0 0 0.5px rgba(255, 255, 255, 0.024),
+        0 6px 14px rgba(0, 0, 0, 0.42),
+        0 2px 4px rgba(0, 0, 0, 0.36);
       -webkit-tap-highlight-color: transparent;
       transition: background-color 0.12s ease, color 0.12s ease, transform 0.1s ease;
     }
@@ -1255,6 +1270,10 @@
       background-color: var(--save-bg);
       color: var(--save-fg);
       font-weight: 500;
+      box-shadow:
+        inset 0 0.5px 0 rgba(255, 255, 255, 0.45),
+        0 6px 14px rgba(0, 0, 0, 0.42),
+        0 2px 4px rgba(0, 0, 0, 0.36);
     }
 
     /* Circular 65x65 Persona / Agent Avatar Button (-10% from 72px) */
@@ -1312,11 +1331,26 @@
       min-height: var(--menu-item-h);
       border-radius: 9999px;
       background-color: var(--surface-composer);
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.42);
+      box-shadow:
+        0 6px 14px rgba(0, 0, 0, 0.42),
+        0 2px 4px rgba(0, 0, 0, 0.36);
       overflow: hidden;
       display: flex;
       align-items: center;
       touch-action: none;
+    }
+
+    .t2-scrub-bar::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+      border-radius: inherit;
+      pointer-events: none;
+      box-shadow:
+        inset 0 0.5px 0 rgba(255, 255, 255, 0.065),
+        inset 0 -0.5px 0 rgba(255, 255, 255, 0.045),
+        inset 0 0 0 0.5px rgba(255, 255, 255, 0.024);
     }
 
     .t2-scrub-bar * {
@@ -1903,12 +1937,19 @@
        4D. FLOATING COMPOSER CAPSULE (#2e3038, 50px #3e414c BUTTONS)
        ========================================================================== */
     .composer-capsule {
+      position: relative;
+      z-index: 1;
       pointer-events: auto;
       margin: 0 16px;
       min-height: 72px;
       border-radius: 36px;
       background-color: var(--surface-composer);
-      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.46);
+      box-shadow:
+        inset 0 0.5px 0 rgba(255, 255, 255, 0.06),
+        inset 0 -0.5px 0 rgba(255, 255, 255, 0.055),
+        inset 0 0 0 0.5px rgba(255, 255, 255, 0.025),
+        0 10px 28px rgba(0, 0, 0, 0.58),
+        0 2px 6px rgba(0, 0, 0, 0.36);
       padding: 11px;
       display: grid;
       grid-template-columns: 50px minmax(0, 1fr) 50px 50px;
@@ -1958,6 +1999,11 @@
       border-radius: 50%;
       background-color: var(--composer-btn);
       color: var(--text-btn-bright);
+      box-shadow:
+        inset 0 0.5px 0 rgba(255, 255, 255, 0.055),
+        inset 0 -0.5px 0 rgba(255, 255, 255, 0.03),
+        inset 0 0 0 0.5px rgba(255, 255, 255, 0.018),
+        0 1px 2px rgba(0, 0, 0, 0.22);
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -2151,9 +2197,9 @@
       z-index: 80;
       width: min(84vw, 330px);
       background-color: var(--bg-drawer);
-      box-shadow: 16px 0 48px rgba(0, 0, 0, 0.78);
+      box-shadow: none;
       transform: translateX(-104%);
-      transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+      transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.24s ease;
       display: flex;
       flex-direction: column;
       overflow-y: auto;
@@ -2165,6 +2211,7 @@
 
     .drawer.open {
       transform: translateX(0);
+      box-shadow: 16px 0 48px rgba(0, 0, 0, 0.78);
     }
 
     .drawer-top-bar {
